@@ -3,6 +3,7 @@
 // ===========================================================================
 #include "ArrangementViewCore.h"
 #include "TouchNavigationMath.h"
+#include "ArrangementHorizontalRingCore.h"
 #include "../../../Source/UICore/BeatMakingFeaturePolicy.h"
 #include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
@@ -29,8 +30,21 @@
 #include <functional>
 #include <limits>
 
+#if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+namespace juce
+{
+    void setApexTimelineViewport(Viewport& viewport, int headerHeight);
+}
+#endif
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-namespace juce { void noteApexTimelineMotion(Component& viewport); }
+namespace juce
+{
+    void noteApexTimelineMotion(Component& viewport);
+    bool isApexLegacyHorizontalFilterEnabled() noexcept;
+    bool isApexSlowPanReplayEnabled() noexcept;
+    bool isApexViewportPreparationEnabled() noexcept;
+    void recordApexTouchPanForBenchmark(Point<float> finger, Point<int> origin) noexcept;
+}
 #endif
 
 namespace ArrangementEditor
@@ -175,6 +189,458 @@ namespace ArrangementEditor
         }
     }
 
+   #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+    class ArrangementViewCore::ViewportPaintCache final : public juce::CachedComponentImage
+    {
+    public:
+        explicit ViewportPaintCache(ArrangementViewCore& owner)
+            : view(owner), pixelsPerSecond(owner.m_zoom.getPixelsPerSecond()),
+              laneHeight(owner.m_zoom.getTrackHeightPx()) {}
+
+        void paint(juce::Graphics& graphics) override
+        {
+            auto* software = dynamic_cast<juce::LowLevelGraphicsSoftwareRenderer*>(
+                &graphics.getInternalContext());
+            const auto scale = graphics.getInternalContext().getPhysicalPixelScaleFactor();
+            const auto visible = view.getViewportVisibleBounds().getIntersection(view.getLocalBounds());
+            const auto zoom = view.m_zoom.getPixelsPerSecond();
+            const auto height = view.m_zoom.getTrackHeightPx();
+            const bool zoomChanged = pixelsPerSecond != zoom || laneHeight != height;
+            const bool separateForeground = juce::isApexAndroidFramePacingEnabled();
+            const bool preparePreviously = canPrepare;
+            canPrepare = false;
+            if (zoomChanged)
+                invalidateAll();
+            if (separateForeground != paintsForegroundSeparately)
+            {
+                invalidateAll();
+                paintsForegroundSeparately = separateForeground;
+            }
+            pixelsPerSecond = zoom;
+            laneHeight = height;
+
+            // JUCE's software raster uses single-precision coordinates. Keep
+            // the existing direct path at deep offsets, while zooming, and
+            // when an offscreen paint doesn't have a real viewport.
+            constexpr double maxRasterCoordinate = 1 << 21;
+            constexpr int64_t maxImagePixels = 4'000'000;
+            if (software == nullptr || !view.isOpaque() || view.getAlpha() != 1.0f
+                || visible.isEmpty() || !std::isfinite(scale) || scale <= 0.0f
+                || visible.getRight() * static_cast<double>(scale) >= maxRasterCoordinate
+                || visible.getBottom() * static_cast<double>(scale) >= maxRasterCoordinate
+                || view.findParentComponentOfClass<juce::Viewport>() == nullptr)
+            {
+                invalidateAll();
+                view.paintEntireComponent(graphics, false);
+                return;
+            }
+
+            const int headerHeight = juce::jmin(visible.getHeight(), view.arrangementContentTop());
+            const auto header = visible.withHeight(headerHeight);
+            const auto body = visible.withTrimmedTop(headerHeight);
+            juce::RectangleList<int> pixels;
+            bool splitHeader = juce::isApexAndroidArrangerDamageClippingEnabled();
+            if (splitHeader)
+            {
+                juce::Graphics::ScopedSaveState bodyClip(graphics);
+                if (graphics.reduceClipRegion(body))
+                    splitHeader = software->getApexDeviceClip(scale, pixels);
+            }
+            if (splitHeader != paintsHeaderSeparately)
+            {
+                invalidateAll();
+                paintsHeaderSeparately = splitHeader;
+            }
+
+            const auto deviceView = toPixels(visible, scale);
+            // The horizontal backing store is a ring, not a periodically
+            // shifted bitmap. Every X movement advances the logical frame and
+            // the image storage offset by the same amount, so retained pixels
+            // NEVER move in RAM when a swipe crosses a halo boundary.
+            //
+            // Y retains its existing contiguous copy path (smooth on phone).
+            // Painting/blitting remain clipped to the real viewport. Clips,
+            // live REC waveforms, gain and fades are never hidden.
+            const auto viewSize = toPixels(visible.withZeroOrigin(), scale).getBottomRight()
+                + juce::Point<int>(5, 5);
+            if (static_cast<int64_t>(viewSize.x) * viewSize.y > maxImagePixels)
+            {
+                releaseResources();
+                view.paintEntireComponent(graphics, false);
+                return;
+            }
+
+            const auto spareColumns = juce::jmax<int64_t>(
+                0, maxImagePixels / juce::jmax(1, viewSize.y) - viewSize.x);
+            const int haloX = static_cast<int>(juce::jmin<int64_t>(
+                viewSize.x / 3, spareColumns / 2));
+            const auto size = viewSize + juce::Point<int>(haloX * 2, 0);
+            const bool reset = !image.isValid()
+                || image.getBounds().getBottomRight() != size || scale != pixelScale;
+            // The physical X address of a content column is:
+            // (contentX - frameX + ringX) modulo imageWidth. Advancing both
+            // frameX and ringX by delta leaves that address invariant.
+            const juce::Rectangle<int> nextFrame(
+                deviceView.getX() - 2 - haloX, deviceView.getY() - 2,
+                size.x, size.y);
+
+            if (reset)
+            {
+                preparationPending = true;
+                image = juce::Image(juce::Image::ARGB, size.x, size.y,
+                                    false, juce::SoftwareImageType());
+                valid.clear();
+                pixelScale = scale;
+                ringX = 0;
+            }
+            else if (nextFrame != frame)
+            {
+                preparationPending = true;
+                valid.clipTo(nextFrame);
+                // Preserve the original efficient vertical move: copy ONLY
+                // the cached valid columns, not the full ring allocation.
+                // The physical X span can be split at the circular seam.
+                // Horizontal-only navigation still copies ZERO bitmap bytes.
+                if (nextFrame.getY() != frame.getY())
+                {
+                    // The overscan is horizontal. Drop pixels outside the
+                    // previous viewport before shifting rows. At fractional
+                    // DPI its clipped bottom row can become interior.
+                    valid.clipTo(toPixels(previousView, scale));
+                    const auto overlap = valid.getBounds();
+                    if (!overlap.isEmpty())
+                    {
+                        const int sourceY = overlap.getY() - frame.getY();
+                        const int destinationY = overlap.getY() - nextFrame.getY();
+                        if (sourceY != destinationY)
+                        {
+                            const int seam = frame.getX()
+                                + ArrangementHorizontalRingCore::seamOffset(ringX, size.x);
+                            const auto first = overlap.getIntersection(
+                                juce::Rectangle<int>::leftTopRightBottom(
+                                    frame.getX(), overlap.getY(), seam, overlap.getBottom()));
+                            const auto second = overlap.getIntersection(
+                                juce::Rectangle<int>::leftTopRightBottom(
+                                    seam, overlap.getY(), frame.getRight(), overlap.getBottom()));
+                            uint64_t copiedPixels = 0;
+                            const auto copyColumns = [&] (const juce::Rectangle<int>& part, int wrapShift)
+                            {
+                                if (part.isEmpty())
+                                    return;
+                                const int imageX = part.getX() - frame.getX() + ringX + wrapShift;
+                                image.moveImageSection(imageX, destinationY, imageX, sourceY,
+                                                       part.getWidth(), part.getHeight());
+                                copiedPixels += static_cast<uint64_t>(part.getWidth())
+                                               * part.getHeight();
+                            };
+                            copyColumns(first, 0);
+                            copyColumns(second, -size.x);
+                            if (copiedPixels > 0
+                                && TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                            {
+                                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheRebases);
+                                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheCopyPixels,
+                                    copiedPixels);
+                            }
+                        }
+                    }
+                }
+                ringX = ArrangementHorizontalRingCore::advance(
+                    ringX, static_cast<int64_t>(nextFrame.getX()) - frame.getX(), size.x);
+            }
+
+            if (visible.getY() != previousView.getY() || (!splitHeader && visible != previousView))
+            {
+                // Toolbar and ruler are pinned to screen space, not to the
+                // timeline's world coordinates. Always invalidate both old
+                // and new header positions even when the backing bitmap
+                // stays fixed across a pan. Otherwise labels ghost.
+                const int header = view.arrangementContentTop();
+                valid.subtract(toPixels(previousView.withHeight(header), scale).expanded(2));
+                valid.subtract(toPixels(visible.withHeight(header), scale).expanded(2));
+            }
+            frame = nextFrame;
+            previousView = visible;
+            canPrepare = splitHeader && separateForeground;
+            preparationPending |= canPrepare && !preparePreviously;
+
+            if (zoomChanged)
+            {
+                // Draw this zoom frame directly. Keep its new cache geometry
+                // ready so the first horizontal gesture can use prepared edges.
+                view.paintEntireComponent(graphics, false);
+                return;
+            }
+
+            if (splitHeader)
+            {
+                // Paint only the requested device pixels. Gaps between a
+                // playhead and a waveform update already have valid pixels.
+                // Keep a one-device-pixel margin for rounding in the two
+                // independently translated blits across the ring seam.
+                juce::RectangleList<int> padded;
+                for (const auto& area : pixels)
+                    padded.add(area.expanded(1).getIntersection(frame));
+                pixels = std::move(padded);
+            }
+            else
+            {
+                const auto dirty = graphics.getClipBounds().getIntersection(visible);
+                if (dirty.isEmpty())
+                    return;
+                pixels.add(toPixels(dirty, scale).expanded(1).getIntersection(frame));
+            }
+            auto missing = pixels;
+            missing.subtract(valid);
+            if (missing.getNumRectangles() > 32)
+                missing = pixels;
+
+            const int seamX = frame.getX()
+                + ArrangementHorizontalRingCore::seamOffset(ringX, size.x);
+            rasterMissing(missing, seamX);
+
+            // Each half maps one contiguous physical image into its original
+            // world-space columns. Both are clipped to the viewport; their
+            // destination spans meet at the seam without overlap or gaps.
+            const auto blitHalf = [&] (int shiftX) -> bool
+            {
+                const auto toUser = juce::AffineTransform::scale(1.0f / scale)
+                    .translated(static_cast<float>(frame.getX() - ringX + shiftX) / scale,
+                                static_cast<float>(frame.getY()) / scale);
+                return software->blitOpaqueImage(image, toUser);
+            };
+            bool copied = true;
+            if (!pixels.isEmpty())
+            {
+                juce::Graphics::ScopedSaveState viewportClip(graphics);
+                if (graphics.reduceClipRegion(splitHeader ? body : visible))
+                {
+                    const auto pixelBounds = pixels.getBounds();
+                    if (pixelBounds.getX() < seamX)
+                        copied = blitHalf(0);
+                    if (copied && pixelBounds.getRight() > seamX)
+                        copied = blitHalf(size.x);
+                }
+            }
+            if (!copied)
+            {
+                canPrepare = false;
+                invalidateAll();
+                view.paintEntireComponent(graphics, false);
+                return;
+            }
+
+            const bool collectMetrics = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+            uint64_t headerPixels = 0;
+            if (splitHeader)
+            {
+                // The toolbar and ruler are pinned to the screen. Draw them
+                // once, even when the world-coordinate ring crosses a seam.
+                juce::Graphics::ScopedSaveState headerClip(graphics);
+                if (graphics.reduceClipRegion(header))
+                {
+                    if (collectMetrics)
+                    {
+                        juce::RectangleList<int> headerDamage;
+                        if (software->getApexDeviceClip(scale, headerDamage))
+                            headerPixels = countPixels(headerDamage);
+                    }
+                    const juce::ScopedValueSetter<bool> backgroundOnly(
+                        view.m_paintingViewportBackground, separateForeground);
+                    view.paintEntireComponent(graphics, true);
+                }
+            }
+
+            if (separateForeground)
+                view.paintTimelineForeground(graphics);
+
+            if (collectMetrics)
+            {
+                const auto drawn = countPixels(missing);
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerRasterPixels, headerPixels + drawn);
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerReusePixels,
+                    countPixels(pixels) - drawn);
+            }
+        }
+
+        void prepareOutsideViewport()
+        {
+            if (!canPrepare || !preparationPending || !image.isValid() || !view.isShowing()
+                || view.m_drag.active || view.m_drag.pending || view.m_rubberBand.isVisible()
+                || pixelsPerSecond != view.m_zoom.getPixelsPerSecond()
+                || laneHeight != view.m_zoom.getTrackHeightPx()
+                || previousView != view.getViewportVisibleBounds().getIntersection(view.getLocalBounds()))
+                return;
+
+            const auto visible = toPixels(previousView, pixelScale);
+            const auto body = toPixels(previousView.withTrimmedTop(view.arrangementContentTop()),
+                                       pixelScale);
+            if (body.getHeight() <= 1)
+                return;
+            const auto local = toPixels(overscannedView(), pixelScale);
+            // Skip the antialiased boundary shared with the pinned ruler.
+            // Only prepare within the existing ring and the clip overscan.
+            const auto range = frame.withY(body.getY() + 1).withHeight(body.getHeight() - 1)
+                .getIntersection(local);
+            juce::RectangleList<int> missing(range);
+            missing.subtract(visible.expanded(1, 0));
+            missing.subtract(valid);
+            if (missing.isEmpty())
+            {
+                preparationPending = false;
+                return;
+            }
+
+            // One small stripe per idle display callback. Start at the edge
+            // closest to the viewport so the first movement benefits first.
+            int bestDistance = std::numeric_limits<int>::max();
+            juce::Rectangle<int> next;
+            for (const auto& rect : missing)
+            {
+                const auto left = rect.getRight() <= visible.getX();
+                const int distance = left ? visible.getX() - rect.getRight()
+                                          : rect.getX() - visible.getRight();
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    const int width = juce::jmin(rect.getWidth(), 24,
+                                                 juce::jmax(1, 32000 / rect.getHeight()));
+                    next = left ? rect.withLeft(rect.getRight() - width) : rect.withWidth(width);
+                }
+            }
+            const int seamX = frame.getX()
+                + ArrangementHorizontalRingCore::seamOffset(ringX, image.getWidth());
+            rasterMissing(juce::RectangleList<int>(next), seamX);
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerPreparedPixels,
+                                      static_cast<uint64_t>(next.getWidth()) * next.getHeight());
+        }
+
+        bool invalidateAll() override
+        {
+            valid.clear();
+            preparationPending = true;
+            return true;
+        }
+
+        bool invalidate(const juce::Rectangle<int>& area) override
+        {
+            if (image.isValid())
+            {
+                const auto logicalDamage = area.getIntersection(overscannedView().expanded(4));
+                if (logicalDamage.isEmpty())
+                    return true;
+                const auto dirty = toPixels(logicalDamage, pixelScale).expanded(2).getIntersection(frame);
+                if (!dirty.isEmpty())
+                {
+                    valid.subtract(dirty);
+                    preparationPending |= !toPixels(previousView, pixelScale).contains(dirty);
+                }
+                if (valid.getNumRectangles() > 64)
+                    invalidateAll();
+            }
+            return true;
+        }
+
+        void releaseResources() override
+        {
+            image = {};
+            invalidateAll();
+        }
+
+    private:
+        juce::Rectangle<int> overscannedView() const
+        {
+            return previousView.expanded(previousView.getWidth() / 2, 0)
+                .getIntersection(view.getLocalBounds());
+        }
+
+        void rasterMissing(const juce::RectangleList<int>& missing, int seamX)
+        {
+            if (missing.isEmpty())
+                return;
+            // A world-space dirty rectangle may cross the ring seam.
+            // Split it into at most two image-space clips, with separate
+            // transforms; no texture copy or whole-frame regeneration.
+            juce::RectangleList<int> firstHalf, secondHalf;
+            const auto beforeSeam = juce::Rectangle<int>::leftTopRightBottom(
+                frame.getX(), frame.getY(), seamX, frame.getBottom());
+            const auto afterSeam = juce::Rectangle<int>::leftTopRightBottom(
+                seamX, frame.getY(), frame.getRight(), frame.getBottom());
+            for (const auto& area : missing)
+            {
+                const auto first = area.getIntersection(beforeSeam);
+                if (!first.isEmpty())
+                    firstHalf.add(first.withPosition(
+                        first.getX() - frame.getX() + ringX,
+                        first.getY() - frame.getY()));
+                const auto second = area.getIntersection(afterSeam);
+                if (!second.isEmpty())
+                    secondHalf.add(second.withPosition(
+                        second.getX() - frame.getX() + ringX - image.getWidth(),
+                        second.getY() - frame.getY()));
+            }
+            const auto rasterHalf = [&] (const juce::RectangleList<int>& local, int shiftX)
+            {
+                if (local.isEmpty())
+                    return;
+                juce::Graphics raster(image);
+                raster.reduceClipRegion(local);
+                raster.addTransform(juce::AffineTransform::scale(pixelScale)
+                    .translated(static_cast<float>(-frame.getX() + ringX + shiftX),
+                                static_cast<float>(-frame.getY())));
+                const juce::ScopedValueSetter<bool> backgroundOnly(
+                    view.m_paintingViewportBackground, paintsForegroundSeparately);
+                const juce::ScopedValueSetter<bool> overscan(
+                    view.m_paintingViewportOverscan, paintsHeaderSeparately);
+                view.paintEntireComponent(raster, true);
+            };
+            rasterHalf(firstHalf, 0);
+            rasterHalf(secondHalf, -image.getWidth());
+            valid.add(missing);
+            valid.consolidate();
+        }
+
+        static uint64_t countPixels(const juce::RectangleList<int>& region)
+        {
+            uint64_t pixels = 0;
+            for (const auto& area : region)
+                pixels += static_cast<uint64_t>(area.getWidth()) * area.getHeight();
+            return pixels;
+        }
+
+        static juce::Rectangle<int> toPixels(juce::Rectangle<int> bounds, float scale)
+        {
+            return (bounds.toDouble() * static_cast<double>(scale)).getSmallestIntegerContainer();
+        }
+
+        ArrangementViewCore& view;
+        double pixelsPerSecond;
+        int laneHeight;
+        bool paintsForegroundSeparately = false;
+        bool paintsHeaderSeparately = false;
+        bool canPrepare = false;
+        bool preparationPending = false;
+        float pixelScale = 0.0f;
+        juce::Image image;
+        juce::Rectangle<int> frame;
+        int ringX = 0;
+        juce::Rectangle<int> previousView;
+        juce::RectangleList<int> valid;
+    };
+   #endif
+
+   #if JUCE_ANDROID
+    void ArrangementViewCore::setViewportPaintCacheEnabled(bool enabled)
+    {
+       #if defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (enabled != (getCachedComponentImage() != nullptr))
+            setCachedComponentImage(enabled ? new ViewportPaintCache(*this) : nullptr);
+       #else
+        juce::ignoreUnused(enabled);
+       #endif
+    }
+   #endif
+
     ArrangementViewCore::ArrangementViewCore()
         : m_toolbar(m_toolState)
         , m_ruler(m_zoom)
@@ -182,6 +648,9 @@ namespace ArrangementEditor
         , m_ghostOverlay(*this)
     {
         setOpaque(true); // paint() fills the entire surface
+       #if JUCE_ANDROID && (!defined(APEX_ANDROID_DIRECT_TIMELINE) || !APEX_ANDROID_DIRECT_TIMELINE)
+        setViewportPaintCacheEnabled(true);
+       #endif
         // Initialize timers for deferred clip work.
         m_rebuildDeferTimer = std::make_unique<RebuildDeferTimer>(*this);
         m_waveformLoadTimer = std::make_unique<WaveformLoadTimer>(*this);
@@ -596,13 +1065,23 @@ namespace ArrangementEditor
         const auto body = getViewportVisibleBounds().getIntersection(
             getLocalBounds().withTop(m_ruler.getBottom()));
         const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        auto* overlayParent = getCachedComponentImage() != nullptr
+                           && juce::isApexAndroidFramePacingEnabled() ? getParentComponent() : nullptr;
+       #endif
         for (const int x : { oldX, newX })
         {
             // The 5 px glow needs one extra pixel of antialiasing margin.
             const auto dirty = body.getIntersection({ x - 3, body.getY(), 7, body.getHeight() });
             if (dirty.isEmpty())
                 continue;
-            repaint(dirty);
+           #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+            // Redraw the old and new line from cached clip/background pixels.
+            if (overlayParent != nullptr)
+                overlayParent->repaint(overlayParent->getLocalArea(this, dirty));
+            else
+           #endif
+                repaint(dirty);
             if (metricsActive)
             {
                 const auto area = static_cast<uint64_t>(dirty.getWidth()) * dirty.getHeight();
@@ -709,7 +1188,7 @@ namespace ArrangementEditor
         int trackH = (int)m_zoom.getTrackHeightPx();
         const int trackCount = getArrangementTrackCount();
         const int contentTop = arrangementContentTop();
-        const auto visibleBounds = getViewportVisibleBounds().getIntersection(g.getClipBounds());
+        const auto visibleBounds = getViewportPaintBounds().getIntersection(g.getClipBounds());
         if (visibleBounds.isEmpty())
             return;
 
@@ -738,10 +1217,15 @@ namespace ArrangementEditor
         for (int i = firstVisibleTrack; i < lastVisibleTrack; ++i)
         {
             const int y = getLaneTopForIndex(i);
-            g.setColour(fromU32(i % 2 == 0 ? Col::trackBg : Col::bg));
-            g.fillRect(0, y, getWidth(), trackH);
+            if (i % 2 == 0)
+            {
+                g.setColour(fromU32(Col::trackBg));
+                g.fillRect(visibleBounds.getIntersection(
+                    { visibleBounds.getX(), y, visibleBounds.getWidth(), trackH }));
+            }
             g.setColour(fromU32(Col::trackLine));
-            g.drawHorizontalLine(y + trackH - 1, 0.f, (float)getWidth());
+            g.drawHorizontalLine(y + trackH - 1, static_cast<float>(visibleBounds.getX()),
+                                 static_cast<float>(visibleBounds.getRight()));
         }
 
         // ── Beat/bar grid across lanes ──────────────────────────────────────
@@ -801,9 +1285,11 @@ namespace ArrangementEditor
         }
 
         // ── Folder Track hierarchy — branch/continuity guides ───────────────
-        // Visual only: subtle grouping band + inherited parent accent on the
-        // lane's left edge. FolderBusCore/routing semantics are untouched.
-        if (m_engineTrackManager != nullptr)
+        // All folder guides lie along the start of the canvas.
+        constexpr int maxDepth = 16;
+        constexpr int indent = 6;
+        constexpr int guideRight = 2 + (maxDepth - 1) * indent + 1;
+        if (visibleBounds.getX() < guideRight && m_engineTrackManager != nullptr)
         {
             // Lane 0 is the MASTER lane when a master track exists; engine
             // tracks sit at lane = engineIndex + masterOffset (mirrors the
@@ -838,7 +1324,7 @@ namespace ArrangementEditor
                 {
                     DAW::Track* cursor = track;
                     juce::String parentId = cursor->getParentTrackID();
-                    while (parentId.isNotEmpty() && depth < 16)
+                    while (parentId.isNotEmpty() && depth < maxDepth)
                     {
                         auto* parent = m_engineTrackManager->getTrack(parentId);
                         if (parent == nullptr) break;
@@ -864,14 +1350,14 @@ namespace ArrangementEditor
                 {
                     // Child lane: darker grouping band + branch guide in the
                     // parent's accent, stepping right with nesting depth.
-                    const int bandW = juce::jmin(4 + (depth - 1) * 6, 22);
+                    const int bandW = juce::jmin(4 + (depth - 1) * indent, 22);
                     g.setColour(fromU32(Col::folderBand).withAlpha(0.60f));
                     g.fillRect(0, laneY, bandW, trackH);
 
                     for (int d = 0; d < depth; ++d)
                     {
                         g.setColour(parentAccent.withAlpha(d == depth - 1 ? 0.50f : 0.28f));
-                        g.fillRect(2 + d * 6, laneY, 1, trackH);
+                        g.fillRect(2 + d * indent, laneY, 1, trackH);
                     }
                 }
             }
@@ -977,6 +1463,15 @@ namespace ArrangementEditor
                 stopTouchNavigation();
         }
         presentPendingZoom();
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (onDisplayFrame && juce::isApexAndroidFramePacingEnabled())
+            onDisplayFrame();
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (!m_touchNavigationArmed && !m_pendingZoom && juce::isApexViewportPreparationEnabled())
+            if (auto* cache = dynamic_cast<ViewportPaintCache*>(getCachedComponentImage()))
+                cache->prepareOutsideViewport();
+       #endif
+       #endif
     }
 
     void ArrangementViewCore::stopTouchNavigation() noexcept
@@ -1158,9 +1653,9 @@ namespace ArrangementEditor
             // One finger pans the timeline — anchored, with a 6 px slop so a
             // small nudge does not register, and the release velocity tracked
             // for the iOS momentum.
-            // Low-pass the touch position before using it: digitizers report
-            // ±1 px of noise on a nearly still finger, which is what made slow
-            // pans shake. The filter trades ~1 frame of lag for stability.
+            // Use one continuous filter for both axes on Android. A
+            // threshold bypass can alternate a stationary frame and a jump
+            // during a slow, steady drag.
             const auto localRaw = firstTouch; // screen-space; never shifts as the viewport pans
             if (! m_smoothedTouchValid)
             {
@@ -1169,8 +1664,25 @@ namespace ArrangementEditor
             }
             else
             {
-                const float retained = (float)std::pow(0.6, frames);
-                m_smoothedTouchPos = m_smoothedTouchPos * retained + localRaw * (1.0f - retained);
+                double filterFrames = frames;
+               #if JUCE_ANDROID
+                bool legacyHorizontalFilter = false;
+                #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                legacyHorizontalFilter = juce::isApexLegacyHorizontalFilterEnabled();
+                // Replay consecutive 60 Hz input samples independently of
+                // the emulator's rendering cadence.
+                if (juce::isApexSlowPanReplayEnabled())
+                    filterFrames = 1.0;
+                #endif
+               #else
+                constexpr bool legacyHorizontalFilter = true;
+               #endif
+                const auto retained = static_cast<float>(std::pow(0.6, filterFrames));
+                m_smoothedTouchPos.x = legacyHorizontalFilter
+                    ? TouchNavigationMath::followHorizontalPan(m_smoothedTouchPos.x, localRaw.x, retained)
+                    : TouchNavigationMath::smoothTouchPan(m_smoothedTouchPos.x, localRaw.x, retained);
+                m_smoothedTouchPos.y = TouchNavigationMath::smoothTouchPan(
+                    m_smoothedTouchPos.y, localRaw.y, retained);
             }
             const auto posScreen = m_smoothedTouchPos.toInt();
             const auto local = getLocalPoint(nullptr, posScreen).toFloat();
@@ -1272,6 +1784,10 @@ namespace ArrangementEditor
 
                 viewport->setViewPosition(nextX, nextY);
             }
+           #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            if (juce::isApexSlowPanReplayEnabled())
+                juce::recordApexTouchPanForBenchmark(localRaw, viewport->getViewPosition());
+           #endif
 
             const auto delta = pos - m_lastTouchPanPos;
             const double retention = std::pow(0.7, frames);
@@ -1625,6 +2141,14 @@ namespace ArrangementEditor
     void ArrangementViewCore::recordMasterOutputPreview(
         double seconds, float leftPeak, float rightPeak, bool playing)
     {
+       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        // A/B diagnostic only: never hide master output in normal playback/REC.
+        if (juce::isApexAndroidMasterPreviewBenchSuppressed())
+            return;
+       #endif
+        TimelinePaintMetrics::ScopedTimer updateTimer(
+            TimelinePaintMetrics::masterPreviewUpdateDurationNs);
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewUpdateCalls);
         if (!playing || !std::isfinite(seconds) || seconds < 0.0)
         {
             m_masterPreviewWasPlaying = false;
@@ -1661,15 +2185,24 @@ namespace ArrangementEditor
         }
 
         const auto visible = getViewportVisibleBounds().withTrimmedTop(arrangementContentTop());
+        auto damage = visible;
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (getCachedComponentImage() != nullptr)
+            damage = damage.withX(0).withWidth(getWidth());
+       #endif
         const auto pps = m_zoom.getPixelsPerSecond();
         const int x = static_cast<int>(std::floor(previewBinX(bin, pps)));
-        const auto masterLane = visible.withY(getLaneTopForIndex(0))
-            .withHeight(m_zoom.getTrackHeightPx()).getIntersection(visible);
-        const auto repaintMaster = [this](juce::Rectangle<int> dirty)
+        const auto masterLane = damage.withY(getLaneTopForIndex(0))
+            .withHeight(m_zoom.getTrackHeightPx()).getIntersection(damage);
+        const auto repaintMaster = [this, visible](juce::Rectangle<int> dirty)
         {
             if (dirty.isEmpty())
                 return;
             repaint(dirty);
+            dirty = dirty.getIntersection(visible);
+            if (dirty.isEmpty())
+                return;
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewRepaintCalls);
             TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewDirtyPixels,
                 static_cast<uint64_t>(dirty.getWidth()) * dirty.getHeight());
         };
@@ -1746,20 +2279,27 @@ namespace ArrangementEditor
                 if (auto* renderer = findClipRendererFor(active->id))
                 {
                     const int y = juce::jmax(renderer->getY() + 17, visible.getY());
-                    repaint(visible.getIntersection({ x - 1, y, 4, 7 }));
+                    repaint(damage.getIntersection({ x - 1, y, 4, 7 }));
                 }
         }
     }
 
     void ArrangementViewCore::drawReadOnlyMasterPreview(juce::Graphics& g)
     {
+       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (juce::isApexAndroidMasterPreviewBenchSuppressed())
+            return;
+       #endif
+        TimelinePaintMetrics::ScopedTimer paintTimer(
+            TimelinePaintMetrics::masterPreviewPaintDurationNs);
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewPaintCalls);
         if (m_masterPreviewBins.empty() || m_engineTrackManager == nullptr
             || !m_engineTrackManager->hasMasterTrack())
             return;
 
         const int laneHeight = m_zoom.getTrackHeightPx();
         const int laneY = getLaneTopForIndex(0);
-        const auto visible = getViewportVisibleBounds().withTrimmedTop(arrangementContentTop());
+        const auto visible = getViewportPaintBounds().withTrimmedTop(arrangementContentTop());
         const auto dirty = visible.withY(laneY).withHeight(laneHeight)
             .getIntersection(visible).getIntersection(g.getClipBounds());
         if (dirty.isEmpty() || laneHeight <= 22)
@@ -1791,6 +2331,7 @@ namespace ArrangementEditor
             const float x = static_cast<float>(previewBinX(it->timeBin, pps));
             if (x >= dirty.getRight())
                 break;
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewBinsDrawn);
             const float left = juce::jmin(1.0f, it->left);
             const float right = juce::jmin(1.0f, it->right);
             g.fillRect(x, centre - left * half, 1.5f, left * half);
@@ -1820,7 +2361,7 @@ namespace ArrangementEditor
         // clip owns the playing track. Draw only ticks in the dirty area.
         if (!m_playbackClippedClipBins.empty())
         {
-            const auto visible = getViewportVisibleBounds().withTrimmedTop(arrangementContentTop());
+            const auto visible = getViewportPaintBounds().withTrimmedTop(arrangementContentTop());
             const auto dirty = visible.getIntersection(g.getClipBounds());
             if (!dirty.isEmpty())
             {
@@ -1857,6 +2398,15 @@ namespace ArrangementEditor
         if (m_drag.active)
             drawGhost(g);
 
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (m_paintingViewportBackground)
+            return;
+       #endif
+        paintTimelineForeground(g);
+    }
+
+    void ArrangementViewCore::paintTimelineForeground(juce::Graphics& g)
+    {
         const int x = timeToScreenX(m_playheadTimeSeconds);
         if (x >= 0 && x <= getWidth())
         {
@@ -2057,10 +2607,10 @@ namespace ArrangementEditor
             TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementZoomUpdates);
             m_viewportScrollX = actual.x;
             m_viewportScrollY = actual.y;
-            updatePinnedViewportControls();
+            updatePinnedViewportControls(heightChanged || actual.y != start.y);
             m_ruler.setScrollOffsetX(actual.x);
-            updateClipRendererVisibility(true);
-            updateAutomationLayout();
+            updateClipRendererVisibility(heightChanged ? ClipBoundsUpdate::all : ClipBoundsUpdate::time);
+            updateAutomationLayout(heightChanged);
            #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             if (viewport != nullptr && m_touchNavigationArmed)
                 juce::noteApexTimelineMotion(*viewport);
@@ -2074,7 +2624,7 @@ namespace ArrangementEditor
             onZoomPresented();
     }
 
-    void ArrangementViewCore::updatePinnedViewportControls()
+    void ArrangementViewCore::updatePinnedViewportControls(bool restack)
     {
         const auto viewportWidth = [this]() -> int
         {
@@ -2112,8 +2662,11 @@ namespace ArrangementEditor
         // and Lock), preserving the right-hand arranger interaction area.
         m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 152,
                                         m_viewportScrollY + 6, 80, 36);
-        m_headerButtonShield->toFront(false);
-        m_pianoRollBtn.toFront(false);
+        if (restack)
+        {
+            m_headerButtonShield->toFront(false);
+            m_pianoRollBtn.toFront(false);
+        }
 
         // Keep Piano Roll code intact but hide/disable its actual widget.
         if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
@@ -2137,6 +2690,11 @@ namespace ArrangementEditor
     {
         if (m_applyingZoom)
             return;
+        auto* viewport = findParentComponentOfClass<juce::Viewport>();
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (viewport != nullptr)
+            juce::setApexTimelineViewport(*viewport, arrangementContentTop());
+       #endif
         m_zoom.observeScroll({ (double)scrollX, (double)scrollY });
         scrollX = juce::jmax(0, scrollX);
         scrollY = juce::jmax(0, scrollY);
@@ -2144,14 +2702,15 @@ namespace ArrangementEditor
         if (m_viewportScrollX == scrollX && m_viewportScrollY == scrollY)
             return;
 
+        const bool verticalMoved = m_viewportScrollY != scrollY;
+        const bool horizontalMoved = m_viewportScrollX != scrollX;
         m_viewportScrollX = scrollX;
         m_viewportScrollY = scrollY;
-        m_ruler.setScrollOffsetX(scrollX);
+        m_ruler.setScrollOffsetX(scrollX, horizontalMoved);
 
        #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-        if (m_touchNavigationArmed)
-            if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
-                juce::noteApexTimelineMotion(*viewport);
+        if (m_touchNavigationArmed && viewport != nullptr)
+            juce::noteApexTimelineMotion(*viewport);
        #endif
 
         TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollEvents);
@@ -2161,12 +2720,12 @@ namespace ArrangementEditor
         // existing clip components are eligible to paint.  It is not a
         // structural resize: clip models, bounds, automation layout, and
         // renderer ownership remain unchanged.
-        updatePinnedViewportControls();
+        updatePinnedViewportControls(verticalMoved);
         updateClipRendererVisibility();
 
         // Moving the viewed JUCE component already invalidates the viewport.
         // A detached arranger can still receive an explicit offset in tests.
-        if (const auto* viewport = findParentComponentOfClass<juce::Viewport>())
+        if (viewport != nullptr)
             if (viewport->getViewPosition() == juce::Point<int>(scrollX, scrollY))
                 return;
         const auto visibleRepaint = getViewportVisibleBounds().getIntersection(getLocalBounds());
@@ -2304,8 +2863,15 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::setTempoBpm(double bpm)
     {
-        m_tempoBpm = juce::jmax(1.0, bpm);
-        m_ruler.setTempo(m_tempoBpm);
+        bpm = juce::jmax(1.0, bpm);
+        if (m_tempoBpm == bpm)
+            return;
+        m_tempoBpm = bpm;
+        m_ruler.setTempo(bpm);
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (getCachedComponentImage() != nullptr)
+            repaint(); // Regenerate the body grid at the new tempo.
+       #endif
     }
 
     void ArrangementViewCore::rebuildClipRenderers()
@@ -2440,7 +3006,10 @@ namespace ArrangementEditor
             renderer->updateClipData(*clip);
             renderer->setCachedAudioHandle(cachedAudio, !hasEngineAudioOwner);
             if (renderer->getBounds() != targetBounds)
+            {
+                m_clipVisibilityGuard = {};
                 renderer->setBounds(targetBounds);
+            }
             renderer->setSelected(m_selection.isSelected(clip->id));
             renderer->setSoloActive(!m_clipAuditionSoloId.isNull()
                 && clip->id == m_clipAuditionSoloId);
@@ -2950,6 +3519,7 @@ namespace ArrangementEditor
         };
 
         auto* addedRenderer = renderer.get();
+        m_clipVisibilityGuard = {};
         addAndMakeVisible(*addedRenderer);
         addedRenderer->setVisible(shouldShowClipRenderer(*addedRenderer));
         if (addedRenderer->isVisible() && addedRenderer->shouldRenderWaveform()
@@ -4456,6 +5026,16 @@ namespace ArrangementEditor
         return { m_viewportScrollX, m_viewportScrollY, viewW, viewH };
     }
 
+    juce::Rectangle<int> ArrangementViewCore::getViewportPaintBounds() const
+    {
+        const auto visible = getViewportVisibleBounds();
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (m_paintingViewportOverscan)
+            return visible.expanded(visible.getWidth() / 2, 0).getIntersection(getLocalBounds());
+       #endif
+        return visible;
+    }
+
     bool ArrangementViewCore::shouldShowClipRenderer(const ClipRenderCore& renderer) const
     {
         // Keep active edits alive if the user drags an item across a viewport
@@ -4465,23 +5045,23 @@ namespace ArrangementEditor
             return true;
 
         const auto bounds = renderer.getBounds();
-        // A clip inserted or moved while scrolling also has to be ready
-        // anywhere the viewport may travel before the next culling pass.
-        return m_clipVisibilityGuard.intersects(bounds)
+        // A model-only edit must not hide a previously prepared clip inside
+        // the guard. Inserts and bounds changes invalidate the guard first.
+        return (renderer.isVisible() && m_clipVisibilityGuard.intersects(bounds))
             || ArrangementClipLodPolicy::intersectsViewport(bounds,
                 getViewportVisibleBounds(), m_zoom.getTrackHeightPx());
     }
 
-    void ArrangementViewCore::updateClipRendererVisibility(bool projectBounds)
+    void ArrangementViewCore::updateClipRendererVisibility(ClipBoundsUpdate update)
     {
         const auto viewport = getViewportVisibleBounds();
-        if (m_inViewportScroll && !m_drag.active && m_clipVisibilityGuard.contains(viewport))
+        if (update == ClipBoundsUpdate::none && m_inViewportScroll
+            && !m_drag.active && m_clipVisibilityGuard.contains(viewport))
             return;
 
         const int trackHeight = m_zoom.getTrackHeightPx();
         const auto region = ArrangementClipLodPolicy::renderRegion(viewport, trackHeight);
-        constexpr int travel = ArrangementClipLodPolicy::kViewportOverscanPx / 2;
-        m_clipVisibilityGuard = viewport.expanded(travel, juce::jmax(travel, trackHeight / 2));
+        auto guard = ArrangementClipLodPolicy::visibilityGuard(viewport, getWidth(), trackHeight);
         for (auto& renderer : m_clipRenderers)
         {
             if (renderer == nullptr)
@@ -4489,10 +5069,20 @@ namespace ArrangementEditor
 
             const auto* clip = renderer->getClip();
             const auto oldBounds = renderer->getBounds();
-            const auto nextBounds = projectBounds && clip ? projectClipBounds(*clip) : oldBounds;
+            auto nextBounds = oldBounds;
+            if (clip != nullptr)
+            {
+                if (update == ClipBoundsUpdate::time)
+                    nextBounds = oldBounds.withX(timeToScreenX(clip->startTime))
+                        .withWidth(juce::jmax(4, timeToScreenX(clip->visualLength())));
+                else if (update == ClipBoundsUpdate::all)
+                    nextBounds = projectClipBounds(*clip);
+            }
             const bool wasVisible = renderer->isVisible();
             const bool shouldBeVisible = m_drag.active || renderer->isEditGestureActive()
                                           || region.intersects(nextBounds);
+            if (!shouldBeVisible)
+                ArrangementClipLodPolicy::excludeHiddenClip(guard, viewport, nextBounds, trackHeight);
             if (m_inViewportScroll)
             {
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollClipIterations);
@@ -4525,6 +5115,9 @@ namespace ArrangementEditor
                 renderer->refresh();
             }
         }
+        // An active drag can force offscreen clips visible. Re-evaluate
+        // once after the drag so that temporary visibility is retired.
+        m_clipVisibilityGuard = m_drag.active ? juce::Rectangle<int>() : guard;
     }
 
     void ArrangementViewCore::updateRubberBandSelection(const juce::Rectangle<int>& bounds)
@@ -8261,11 +8854,12 @@ void ArrangementViewCore::clearAutomationLanes(const DAW::TrackID& trackId)
     }
 }
 
-void ArrangementViewCore::updateAutomationLayout()
+void ArrangementViewCore::updateAutomationLayout(bool restack)
 {
-    // Send all clip renderers to the back first
-    for (auto& r : m_clipRenderers)
-        r->toBack();
+    // Time zoom changes dimensions without changing any child ownership.
+    if (restack)
+        for (auto& renderer : m_clipRenderers)
+            renderer->toBack();
 
     for (auto& [trackId, container] : m_automationContainers)
     {
@@ -8297,7 +8891,8 @@ void ArrangementViewCore::updateAutomationLayout()
 
         container->setVisible(true);
         container->setBounds(laneBounds.getX(), y, laneBounds.getWidth(), height);
-        container->toFront(false);
+        if (restack)
+            container->toFront(false);
         container->setSamplesPerPixel(juce::jmax(1.0, m_engineSampleRate / juce::jmax(1.0, m_zoom.getPixelsPerSecond())));
         container->setZoomLevel(m_zoom.getPixelsPerSecond());
         container->setSampleRate(m_engineSampleRate);
@@ -8310,7 +8905,8 @@ void ArrangementViewCore::updateAutomationLayout()
 
     // Re-front the pinned toolbar/ruler AFTER every container toFront so the
     // Quick New Track button always wins hit-testing in the pinned strip.
-    ensureToolbarZOrder();
+    if (restack)
+        ensureToolbarZOrder();
 }
 
 void ArrangementViewCore::changeListenerCallback(juce::ChangeBroadcaster* source)

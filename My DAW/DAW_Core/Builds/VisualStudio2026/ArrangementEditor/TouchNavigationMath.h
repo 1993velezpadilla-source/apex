@@ -32,6 +32,22 @@ namespace ArrangementEditor
             return static_cast<int>(std::lround(targetPx));
         }
 
+        static float smoothTouchPan(float previous, float observed, float retention) noexcept
+        {
+            if (!std::isfinite(observed))
+                return previous;
+            return previous * retention + observed * (1.0f - retention);
+        }
+
+        // Desktop touch and the Android comparison retain the former policy.
+        static float followHorizontalPan(float previous, float observed, float retention) noexcept
+        {
+            if (!std::isfinite(observed))
+                return previous;
+            return std::abs(observed - previous) > 1.5f
+                ? observed : smoothTouchPan(previous, observed, retention);
+        }
+
         // Keep the timeline point under the gesture centroid fixed on screen.
         static int zoomPosition(double contentAnchorPx, double viewAnchorPx,
                                 double newToOldZoom, int maxViewPx,

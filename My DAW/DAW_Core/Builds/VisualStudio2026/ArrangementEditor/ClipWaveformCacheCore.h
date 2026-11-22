@@ -18,6 +18,18 @@ namespace ArrangementEditor
     {
         std::vector<float> minPeaks;
         std::vector<float> maxPeaks;
+        DAW::AudioFileManager::CachedAudioHandle overview;
+
+        const std::vector<float>& minimums() const noexcept
+        {
+            return overview ? overview->getRawMinRef() : minPeaks;
+        }
+
+        const std::vector<float>& maximums() const noexcept
+        {
+            return overview ? overview->getRawMaxRef() : maxPeaks;
+        }
+
         /** Peak-bucket indices whose source samples reached 0 dBFS
             (|sample| >= 1). Sorted ascending; used to draw the clipped-
             position markers on the clip. */
@@ -57,22 +69,28 @@ namespace ArrangementEditor
                 juce::ScopedLock sl(bufferLock_);
                 pendingBuffer_.makeCopyOf(processedBuffer);
                 hasPendingBuffer_ = true;
-                m_targetWidth = targetWidth;
+                pendingBufferWidth_ = targetWidth;
             }
             if (startWorker)
+            {
                 startThread(juce::Thread::Priority::background);
+                notify();
+            }
         }
 
-        // Trigger async peak update for current source/buffer if not already running.
-        // Safe to call from UI thread; defers if thread already running.
+        // Wake the worker when an offscreen buffer becomes drawable.
         void requestPeaksUpdate()
         {
             if (isThreadRunning())
+            {
+                notify();
                 return;
-            if (!m_requestPending && m_sourcePath.empty() && !hasPendingBuffer_)
+            }
+            if (!m_requestPending && m_sourcePath.empty() && !hasPendingBuffer())
                 return;
             m_requestPending = true;
             startThread(juce::Thread::Priority::background);
+            notify();
         }
 
         bool hasPendingBuffer()
@@ -83,11 +101,25 @@ namespace ArrangementEditor
 
         // Get cached peaks (call from UI thread)
         // THREAD-SAFE: Must be called with peaksLock_ held
-        const WaveformPeakData& getPeaks() const { return m_peaks; }
+        const WaveformPeakData& getPeaks() const
+        {
+            // Legacy callers must hold peaksLock_ for this reference.
+            return m_peaks ? *m_peaks : emptyPeaks();
+        }
+
+        // Copy shared ownership under a tiny lock, then render with no peaks
+        // mutex held. Background peak updates atomically replace this pointer,
+        // never mutate peak arrays while the UI is reading them.
+        std::shared_ptr<const WaveformPeakData> getPeaksSnapshot() const
+        {
+            juce::CriticalSection::ScopedLockType lock(peaksLock_);
+            return m_peaks;
+        }
+
         bool isReady() const
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            return m_peaks.valid;
+            return m_peaks && m_peaks->valid;
         }
 
         // Lock for thread-safe access to m_peaks during UI paint and background thread completion
@@ -97,18 +129,25 @@ namespace ArrangementEditor
         std::function<void()> onPeaksReady;
 
     private:
+        static const WaveformPeakData& emptyPeaks() noexcept
+        {
+            static const WaveformPeakData empty;
+            return empty;
+        }
+
         void run() override;
 
         std::string      m_sourcePath;
         int              m_targetWidth = 0;
         int64_t          m_visibleSamplesHint = 0;
-        WaveformPeakData m_peaks;
+        std::shared_ptr<const WaveformPeakData> m_peaks;
         DAW::AudioFileManager::CachedAudioHandle cachedOverviewSource_;
         bool             m_requestPending = false;
 
         // For buffer-based peak generation
         juce::CriticalSection    bufferLock_;
         juce::AudioBuffer<float> pendingBuffer_;
+        int                      pendingBufferWidth_ = 0;
         bool                     hasPendingBuffer_ = false;
         std::shared_ptr<void>    lifetimeToken_;
 
@@ -117,7 +156,7 @@ namespace ArrangementEditor
         mutable juce::CriticalSection peaksLock_;
 
         void generatePeaks();
-        void generatePeaksFromBuffer();
+        bool generatePendingBufferPeaks();
         void readAudioFile(const juce::File& file);
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipWaveformCacheCore)

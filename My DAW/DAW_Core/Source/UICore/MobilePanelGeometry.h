@@ -163,40 +163,49 @@ constexpr int timelineWheelClampedPosition(int current, int contentSpan,
     return target < 0 ? 0 : target > limit ? limit : static_cast<int>(target);
 }
 
-// Extend the phone Arrangement in 30-second chunks only when the playhead
-// approaches its existing clip/loop extent. Unconditional runway would grow
-// content width on unrelated layout refreshes early in a short project.
-// Caller must pass the clip/loop extent BEFORE adding playhead headroom.
+// The arranger is a virtual time surface, not a series of 30-second pages.
+// The old 30s initial extent stopped finger scrolling around bar 15 at
+// 120 BPM during a long take; only after Stop did the saved clip enlarge it.
+// JUCE paints the *visible* viewport, so reserving a 10-minute timeline does
+// not allocate ten minutes of waveform bitmaps. Grow in ten-minute increments
+// with two minutes' warning rather than resizing the content at each bar.
+// The caller supplies clip/loop extent, NOT a playhead-adjusted extent.
+inline constexpr double kTimelinePhoneRunwaySeconds = 600.0;
+inline constexpr double kTimelinePhoneGrowthWarningSeconds = 120.0;
 constexpr double timelinePhonePlaybackExtentSeconds(
     double projectExtentSeconds, double playheadSeconds) noexcept
 {
-    // Invalid transport timestamps (e.g. during project restore) must not
-    // poison the Arrangement extent or trigger repeated viewport rebuilds.
-    // A negative playhead is not a reason to extend the song either.
-    // A corrupt clip/loop extent can also arrive during project restore.
-    // Never propagate NaN/Inf/negative content widths to the phone viewport.
+    // Preserve long clips and restored loop regions. Invalid times must
+    // never propagate NaN/Inf into the JUCE viewport's integer bounds.
     const double safeExtent = projectExtentSeconds >= 0.0
         && projectExtentSeconds <= std::numeric_limits<double>::max()
         ? projectExtentSeconds : 0.0;
-    if (!(playheadSeconds >= 0.0)
-        || playheadSeconds > 86400.0)
-        return safeExtent;
-    if (playheadSeconds + 2.0 <= safeExtent)
-        return safeExtent;
-    const double withRunway = playheadSeconds + 30.0;
-    return safeExtent > withRunway ? safeExtent : withRunway;
+    const double minimumExtent = safeExtent > kTimelinePhoneRunwaySeconds
+        ? safeExtent : kTimelinePhoneRunwaySeconds;
+    if (!(playheadSeconds >= 0.0) || playheadSeconds > 86400.0)
+        return minimumExtent;
+    if (playheadSeconds + kTimelinePhoneGrowthWarningSeconds <= minimumExtent)
+        return minimumExtent;
+    // Add a full new runway BEFORE the playhead reaches the scroll edge.
+    // One structural resize per ~8 minutes, not one every 30 seconds.
+    const double extended = playheadSeconds + kTimelinePhoneRunwaySeconds;
+    return extended > minimumExtent ? extended : minimumExtent;
 }
+
+// Portable C++17 safety gates for empty projects and invalid restored state.
+static_assert(timelinePhonePlaybackExtentSeconds(30.0, 0.0) == 600.0);
+static_assert(timelinePhonePlaybackExtentSeconds(30.0, 28.0) == 600.0);
+static_assert(timelinePhonePlaybackExtentSeconds(30.0, 480.0) == 600.0);
+static_assert(timelinePhonePlaybackExtentSeconds(30.0, 480.1) > 1080.0);
+static_assert(timelinePhonePlaybackExtentSeconds(1200.0, 20.0) == 1200.0);
+static_assert(timelinePhonePlaybackExtentSeconds(
+    std::numeric_limits<double>::quiet_NaN(), 0.0) == 600.0);
+static_assert(timelinePhonePlaybackExtentSeconds(
+    std::numeric_limits<double>::infinity(), -1.0) == 600.0);
+static_assert(timelinePhonePlaybackExtentSeconds(-50.0, 20.0) == 600.0);
 
 // The bottom phone Transport owns Mixer/Sends launch actions. Desktop-only
 // restore bubbles must stay hidden after closing a floating phone panel.
-// Portable C++17 regression gates: corrupted restored clip/loop extents.
-static_assert(timelinePhonePlaybackExtentSeconds(
-    std::numeric_limits<double>::quiet_NaN(), 0.0) == 30.0);
-static_assert(timelinePhonePlaybackExtentSeconds(
-    std::numeric_limits<double>::infinity(), -1.0) == 0.0);
-static_assert(timelinePhonePlaybackExtentSeconds(-50.0, 20.0) == 50.0);
-static_assert(timelinePhonePlaybackExtentSeconds(200.0, 20.0) == 200.0);
-
 constexpr bool desktopRestoreBubbleVisible(bool phonePresentation) noexcept
 {
     return !phonePresentation;

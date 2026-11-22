@@ -115,7 +115,8 @@ public:
    #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
     enum class TimelineBenchmarkTransport { Stopped, Playing, Recording };
     bool prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
-                                            TimelineBenchmarkTransport mode);
+                                            TimelineBenchmarkTransport mode, bool retainedViewport = false,
+                                            bool rulerReplay = false);
     bool startTimelineNavigationBenchmarkTransport(TimelineBenchmarkTransport mode);
     juce::var timelineNavigationBenchmarkState(bool finishPhase);
    #endif
@@ -126,6 +127,9 @@ public:
    #endif
    #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
     juce::Rectangle<int> androidUiBenchmarkBounds() const;
+   #endif
+   #if JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+    void enableAndroidGpuPresentation();
    #endif
     MainComponent();
     ~MainComponent() override;
@@ -494,7 +498,7 @@ private:
     void setDefaultMixerWindowBounds();
     bool deleteTrackOrFolder(const DAW::TrackID& trackId);
     void updateTimelineViewportContentBounds();
-    void sizeTimelineContent();
+    void sizeTimelineContent(bool updateHeight = true);
     void syncTimelineViewportPosition();
     void syncPlaylistTimeline();
 
@@ -591,6 +595,21 @@ private:
     // Autosave failure toast throttle
     juce::Time   lastAutosaveFailToastTime_;
     static constexpr int kAutosaveFailToastIntervalSec = 30;
+
+   #if JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+    struct AndroidGpuFrames final : juce::OpenGLRenderer
+    {
+        void newOpenGLContextCreated() override {}
+        void renderOpenGL() override
+        {
+            juce::OpenGLHelpers::clear(juce::Colours::black);
+            rendered.fetch_add(1, std::memory_order_relaxed);
+        }
+        void openGLContextClosing() override {}
+        std::atomic<juce::int64> rendered { 0 };
+    } androidGpuFrames_;
+    juce::OpenGLContext androidGpuContext_;
+   #endif
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

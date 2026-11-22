@@ -342,7 +342,7 @@ public:
         {
             const auto paintAction = [&](juce::Rectangle<int> r, const juce::String& label, juce::Colour tint)
             {
-                if (r.isEmpty()) return;
+                if (r.isEmpty() || !g.clipRegionIntersects(r)) return;
                 g.setColour(tint.withAlpha(0.20f));
                 g.fillRoundedRectangle(r.toFloat().reduced(2.f), 7.f);
                 g.setColour(tint.withAlpha(0.65f));
@@ -358,6 +358,7 @@ public:
         // Quick-access panel buttons with icons — shared control-state language
         auto mouse = getMouseXYRelative().toFloat();
         // FX Chain / Side Panel icon — chain links
+        if (!fxBtnBounds_.isEmpty() && g.clipRegionIntersects(fxBtnBounds_.expanded(8)))
         {
             auto r = fxBtnBounds_.toFloat();
             bool hov = r.contains(mouse);
@@ -375,6 +376,7 @@ public:
             g.drawRoundedRectangle(c.x - 2.f, c.y - 3.f, 9.f, 6.f, 2.f, 1.6f);
         }
         // FX Browser icon — magnifying glass
+        if (!brBtnBounds_.isEmpty() && g.clipRegionIntersects(brBtnBounds_.expanded(8)))
         {
             auto r = brBtnBounds_.toFloat();
             bool hov = r.contains(mouse);

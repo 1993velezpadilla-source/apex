@@ -186,6 +186,13 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> trackListScrollRowBoundsAssignments{0};
     static inline std::atomic<uint64_t> trackListScrollRowPositionUpdates{0};
     static inline std::atomic<uint64_t> arrangementScrollEvents{0};
+    static inline std::atomic<uint64_t> arrangerReusePixels{0};
+    static inline std::atomic<uint64_t> arrangerRasterPixels{0};
+    static inline std::atomic<uint64_t> arrangerPreparedPixels{0};
+    // Physical pixel copies when the Android native-density cache rebases.
+    // A smooth horizontal gesture should not shift a full bitmap every frame.
+    static inline std::atomic<uint64_t> arrangerCacheCopyPixels{0};
+    static inline std::atomic<uint64_t> arrangerCacheRebases{0};
     static inline std::atomic<uint64_t> arrangementScrollClipIterations{0};
     static inline std::atomic<uint64_t> arrangementScrollVisibilityChanges{0};
     static inline std::atomic<uint64_t> arrangementScrollWaveformRefreshes{0};
@@ -198,12 +205,17 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> waveformRefreshes{0};
     static inline std::atomic<uint64_t> liveRecordingWaveformPaints{0};
     static inline std::atomic<uint64_t> masterPreviewDirtyPixels{0};
+    static inline std::atomic<uint64_t> masterPreviewUpdateCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewPaintCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewRepaintCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewBinsDrawn{0};
     static inline std::atomic<uint64_t> arrangementRendererRebuilds{0};
     static inline std::atomic<uint64_t> arrangementZoomUpdates{0};
 
     static inline SampleRing viewportZoomDurationNs;
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
     static inline std::atomic<uint64_t> waveformCachedDraws{0};
+    static inline std::atomic<uint64_t> waveformBatchedPaints{0};
 
     // ── Counter group: automation ───────────────────────────────────────
     static inline std::atomic<uint64_t> automationTimerTicks{0};
@@ -220,6 +232,8 @@ struct TimelinePaintMetrics
     // ── Sample rings for timing/area distributions ──────────────────────
     static inline SampleRing paintDurationNs;               // ArrangementViewCore::paint() duration
     static inline SampleRing paintChildrenDurationNs;       // paintOverChildren() duration
+    static inline SampleRing masterPreviewUpdateDurationNs; // Master 60Hz tick and clipping scan
+    static inline SampleRing masterPreviewPaintDurationNs;  // Master stereo columns drawn
     static inline SampleRing waveformDurationNs;            // Clip waveform draw duration
     static inline SampleRing clipNameDurationNs;
     static inline SampleRing frameIntervalNs;               // ArrangementView 60Hz timer interval (message thread)
@@ -332,6 +346,11 @@ struct TimelinePaintMetrics
         trackListScrollRowBoundsAssignments = 0;
         trackListScrollRowPositionUpdates = 0;
         arrangementScrollEvents = 0;
+        arrangerReusePixels = 0;
+        arrangerRasterPixels = 0;
+        arrangerPreparedPixels = 0;
+        arrangerCacheCopyPixels = 0;
+        arrangerCacheRebases = 0;
         arrangementScrollClipIterations = 0;
         arrangementScrollVisibilityChanges = 0;
         arrangementScrollWaveformRefreshes = 0;
@@ -342,10 +361,15 @@ struct TimelinePaintMetrics
         waveformRefreshes     = 0;
         liveRecordingWaveformPaints = 0;
         masterPreviewDirtyPixels = 0;
+        masterPreviewUpdateCalls = 0;
+        masterPreviewPaintCalls = 0;
+        masterPreviewRepaintCalls = 0;
+        masterPreviewBinsDrawn = 0;
         arrangementRendererRebuilds = 0;
         arrangementZoomUpdates = 0;
         waveformPeaksWalked   = 0;
         waveformCachedDraws   = 0;
+        waveformBatchedPaints = 0;
         automationTimerTicks  = 0;
         automationTimerSkipped = 0;
         automationTimerInvalidated = 0;
@@ -358,6 +382,8 @@ struct TimelinePaintMetrics
         paintDurationNs.reset();
         paintChildrenDurationNs.reset();
         waveformDurationNs.reset();
+        masterPreviewUpdateDurationNs.reset();
+        masterPreviewPaintDurationNs.reset();
         viewportZoomDurationNs.reset();
         clipNameDurationNs.reset();
         frameIntervalNs.reset();

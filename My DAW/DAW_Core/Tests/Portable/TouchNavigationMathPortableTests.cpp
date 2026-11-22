@@ -1,6 +1,7 @@
 // Build standalone on any C++17 compiler:
 // c++ -std=c++17 -Wall -Wextra -Werror TouchNavigationMathPortableTests.cpp -o touch-tests && ./touch-tests
 #include "../../Builds/VisualStudio2026/ArrangementEditor/TouchNavigationMath.h"
+#include "../../Builds/VisualStudio2026/ArrangementEditor/ArrangementHorizontalRingCore.h"
 #include "../../Source/UICore/BeatMakingFeaturePolicy.h"
 
 // Audio-first release invariant: UI code must retain but must not expose
@@ -14,12 +15,103 @@ static_assert(!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled,
 #include <limits>
 
 using ArrangementEditor::TouchNavigationMath;
+using ArrangementEditor::ArrangementHorizontalRingCore;
 
 int main()
 {
+    // Horizontal timeline ring regression: retained pixels NEVER move to a
+    // new image-memory address when X scrolls. Exercise both directions, tiny
+    // touch deltas, halo crossings, big flings, and multiple full rotations.
+    static_assert(ArrangementHorizontalRingCore::advance(0, 9, 8) == 1);
+    static_assert(ArrangementHorizontalRingCore::advance(1, -2, 8) == 7);
+    static_assert(ArrangementHorizontalRingCore::advance(3, 18, 8) == 5);
+    static_assert(ArrangementHorizontalRingCore::advance(0, 999999, 0) == 0);
+    static_assert(ArrangementHorizontalRingCore::seamOffset(3, 8) == 5);
+    static_assert(ArrangementHorizontalRingCore::storageX(105, 100, 3, 8) == 0);
+    {
+        constexpr int capacity = 91;
+        int frameX = 120;
+        int ringX = 0;
+        int stored[capacity];
+        for (int x = frameX; x < frameX + capacity; ++x)
+            stored[ArrangementHorizontalRingCore::storageX(x, frameX, ringX, capacity)] = x;
+
+        for (const int delta : { 1, 1, 7, 16, 30, 22, 33, -1, -2, -5, -38,
+                                 -51, 89, 1000, -1100, 0, 2, 3, -8 })
+        {
+            const int oldFrameX = frameX;
+            const int nextFrameX = frameX + delta;
+            const int nextRingX = ArrangementHorizontalRingCore::advance(
+                ringX, delta, capacity);
+            const int intersectionStart = std::max(oldFrameX, nextFrameX);
+            const int intersectionEnd = std::min(oldFrameX + capacity,
+                                                 nextFrameX + capacity);
+            for (int x = intersectionStart; x < intersectionEnd; ++x)
+            {
+                const int oldStorage = ArrangementHorizontalRingCore::storageX(
+                    x, oldFrameX, ringX, capacity);
+                const int newStorage = ArrangementHorizontalRingCore::storageX(
+                    x, nextFrameX, nextRingX, capacity);
+                assert(oldStorage == newStorage);
+                assert(stored[newStorage] == x);
+            }
+            frameX = nextFrameX;
+            ringX = nextRingX;
+            const int seamX = frameX
+                + ArrangementHorizontalRingCore::seamOffset(ringX, capacity);
+            for (int x = frameX; x < frameX + capacity; ++x)
+            {
+                const int physical = ArrangementHorizontalRingCore::storageX(
+                    x, frameX, ringX, capacity);
+                assert(physical >= 0 && physical < capacity);
+                assert((x < seamX) == (physical >= ringX) || ringX == 0);
+                if (x < intersectionStart || x >= intersectionEnd)
+                    stored[physical] = x; // raster the entering stripe
+                assert(stored[physical] == x);
+            }
+        }
+    }
+
+
     // A short phone pan and an interrupted fling must restore full-detail
     // waveform paint without a structural renderer rebuild. A stationary
     // tap or an ongoing fling must not schedule that extra repaint.
+    assert(TouchNavigationMath::followHorizontalPan(100.f, 164.f, 0.6f) == 164.f);
+    assert(TouchNavigationMath::followHorizontalPan(164.f, 90.f, 0.6f) == 90.f);
+    assert(std::abs(TouchNavigationMath::followHorizontalPan(100.f, 101.f, 0.6f) - 100.4f) < 0.001f);
+    // An input step of one logical pixel per display frame used to
+    // alternate between holding still and jumping two pixels. Reproduce the
+    // actual Point::toInt truncation and cover both drag directions.
+    for (const int refreshRate : { 60, 90, 120 })
+    {
+        const auto retained = static_cast<float>(std::pow(0.6, 60.0 / refreshRate));
+        for (const int direction : { -1, 1 })
+        {
+            constexpr float start = 200.55f;
+            float legacy = start, smooth = start;
+            int legacyPosition = 1000, smoothPosition = 1000;
+            int holds = 0, jumps = 0;
+            for (int frame = 1; frame <= 200; ++frame)
+            {
+                const float observed = start + static_cast<float>(direction * frame);
+                legacy = TouchNavigationMath::followHorizontalPan(legacy, observed, retained);
+                smooth = TouchNavigationMath::smoothTouchPan(smooth, observed, retained);
+                const int oldNext = TouchNavigationMath::panPosition(
+                    1000, static_cast<int>(legacy) - static_cast<int>(start), 4000);
+                const int newNext = TouchNavigationMath::panPosition(
+                    1000, static_cast<int>(smooth) - static_cast<int>(start), 4000);
+                if (frame > 40)
+                {
+                    holds += oldNext == legacyPosition;
+                    jumps += std::abs(oldNext - legacyPosition) == 2;
+                    assert(newNext - smoothPosition == -direction);
+                }
+                legacyPosition = oldNext;
+                smoothPosition = newNext;
+            }
+            assert(holds == 80 && jumps == 80);
+        }
+    }
     static_assert(TouchNavigationMath::touchPanNeedsDetailRepaint(true, false));
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(false, false));
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(true, true));

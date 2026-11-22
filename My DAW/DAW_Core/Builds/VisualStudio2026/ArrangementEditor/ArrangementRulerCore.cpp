@@ -4,6 +4,17 @@
 #include "ArrangementRulerCore.h"
 #include "../../../Source/DiagnosticsCore/TimelinePaintMetrics.h"
 
+#if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+ #include <charconv>
+namespace juce
+{
+    bool drawApexAndroidRulerNumerals(Graphics&, Span<const char>, Rectangle<int>);
+   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    void recordApexAndroidRulerLabel(int bar, bool atlas) noexcept;
+   #endif
+}
+#endif
+
 namespace ArrangementEditor
 {
     namespace Col
@@ -40,12 +51,28 @@ namespace ArrangementEditor
          *  Clamped to ruler local bounds. */
         constexpr int kRulerPlayheadHalfWidth = 6;
 
-        /** Song-time label "m:ss" for a given time in seconds. */
-        juce::String formatTimeSeconds(double seconds)
+        /** The ruler rounds to the nearest second for its m:ss label. */
+        int labelSeconds(double seconds)
         {
-            const int totalSecs = juce::jmax(0, (int) std::llround(seconds));
-            return juce::String::formatted("%d:%02d", totalSecs / 60, totalSecs % 60);
+            return juce::jmax(0, (int) std::llround(seconds));
         }
+
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        bool drawRulerDigits(juce::Graphics& g, juce::Rectangle<int> box,
+                             int number, int seconds = -1)
+        {
+            // Enough space for an int and the optional colon and seconds.
+            char digits[24];
+            auto* end = std::to_chars(digits, digits + sizeof(digits) - 3, number).ptr;
+            if (seconds >= 0)
+            {
+                *end++ = ':';
+                *end++ = (char) ('0' + seconds / 10);
+                *end++ = (char) ('0' + seconds % 10);
+            }
+            return juce::drawApexAndroidRulerNumerals(g, { digits, (size_t) (end - digits) }, box);
+        }
+       #endif
 
         juce::Rectangle<int> rulerPlayheadDirtyRect(
             int playheadX, int rulerWidth, int rulerHeight) noexcept
@@ -85,14 +112,18 @@ namespace ArrangementEditor
         }
     }
 
-    void ArrangementRulerCore::setScrollOffsetX(int scrollOffsetX)
+    void ArrangementRulerCore::setScrollOffsetX(int scrollOffsetX, bool boundsMovePending)
     {
         scrollOffsetX = juce::jmax(0, scrollOffsetX);
         if (m_scrollOffsetX == scrollOffsetX)
             return;
 
         m_scrollOffsetX = scrollOffsetX;
-        repaint();
+        // The horizontal viewport pan immediately moves these pinned bounds.
+        // JUCE dirties the old/new areas there; a second full ruler repaint
+        // before setBounds() is redundant. Zoom-only changes still repaint.
+        if (!boundsMovePending)
+            repaint();
     }
 
     void ArrangementRulerCore::setLoopRegion(double startTime, double endTime)
@@ -127,89 +158,89 @@ namespace ArrangementEditor
         g.drawHorizontalLine((int)b.getBottom() - 1, b.getX(), b.getRight());
     }
 
-void ArrangementRulerCore::drawGrid(juce::Graphics& g)
+    void ArrangementRulerCore::drawGrid(juce::Graphics& g)
     {
-        double beatDuration = 60.0 / m_bpm;
-        double barDuration = beatDuration * 4.0;
+        const auto dirty = g.getClipBounds().getIntersection(getLocalBounds());
+        if (dirty.isEmpty())
+            return;
 
-        double viewStart = xToTime(0);
-        double viewEnd = xToTime(getWidth());
-
-        // Compute pixels-per-beat / pixels-per-bar from actual BPM + zoom
+        const double beatDuration = 60.0 / m_bpm;
+        const double barDuration = beatDuration * 4.0;
         const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
-        const double pxPerBar  = barDuration  * m_zoom.getPixelsPerSecond();
-        const int    barStep   = GridLodPolicy::barStep(pxPerBar);
-        const bool   noBeats   = GridLodPolicy::suppressBeats(pxPerBeat);
+        const double pxPerBar = barDuration * m_zoom.getPixelsPerSecond();
+        if (!std::isfinite(pxPerBar) || pxPerBar <= 0.0)
+            return;
 
-        // Seconds labels (m:ss) only when bars are spaced wide enough that the
-        // ~44 px label cannot collide with its neighbours — bars-only beyond.
+        const int barStep = GridLodPolicy::barStep(pxPerBar);
+        const int labelStep = GridLodPolicy::barLabelStep(pxPerBar);
+        const bool drawBeats = !GridLodPolicy::suppressBeats(pxPerBeat);
         const bool drawSeconds = pxPerBar >= 60.0;
+        constexpr int labelReach = 46;
+        const int firstBar = static_cast<int>(
+            xToTime(juce::jmax(0, dirty.getX() - labelReach)) / barDuration);
+        const int lastBar = static_cast<int>(xToTime(dirty.getRight()) / barDuration) + 1;
+        static const juce::Font barFont("Segoe UI", 9.f, juce::Font::plain);
+        static const juce::Font secondsFont("Segoe UI", 8.f, juce::Font::plain);
+        const float bottom = static_cast<float>(getHeight());
 
-        int barStart = (int)(viewStart / barDuration);
-        int barEnd = (int)(viewEnd / barDuration) + 1;
-
-        for (int bar = barStart; bar <= barEnd; ++bar)
+        for (int bar = firstBar - firstBar % barStep; bar <= lastBar; bar += barStep)
         {
-            // Skip bars at extreme zoom-out to reduce GPU draw calls
-            if (barStep > 1 && (bar % barStep) != 0)
+            const double barTime = bar * barDuration;
+            const int x = timeToX(barTime);
+            if (x >= dirty.getRight())
+                break;
+
+            if (dirty.intersects(juce::Rectangle<int>{ x, 20, 1, getHeight() - 20 }))
             {
-                // Still draw bar numbers for skipped bars if they are
-                // far enough apart to be legible
-                double barTime = bar * barDuration;
-                int x = timeToX(barTime);
-                if (x >= 0 && x <= getWidth())
+                g.setColour(fromU32(Col::gridLineMajor));
+                g.drawVerticalLine(x, 20.f, bottom);
+            }
+
+            if (bar % labelStep == 0)
+            {
+                const juce::Rectangle<int> barLabel(x + 2, 4, 40, 14);
+                if (dirty.intersects(barLabel))
                 {
                     g.setColour(fromU32(Col::text));
-                    g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
-                    g.drawText(juce::String(bar + 1), x + 2, 4, 40, 14,
-                               juce::Justification::centredLeft);
-                    if (drawSeconds)
-                    {
-                        g.setColour(fromU32(Col::textDim));
-                        g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
-                        g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
-                                   juce::Justification::centredLeft);
-                    }
+                    g.setFont(barFont);
+                    bool drawn = false;
+                   #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+                    drawn = drawRulerDigits(g, barLabel, bar + 1);
+                   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                    juce::recordApexAndroidRulerLabel(bar + 1, drawn);
+                   #endif
+                   #endif
+                    if (!drawn)
+                        g.drawText(juce::String(bar + 1), barLabel, juce::Justification::centredLeft);
                 }
-                continue;
+                const juce::Rectangle<int> secondsLabel(x + 2, 18, 44, 12);
+                if (drawSeconds && dirty.intersects(secondsLabel))
+                {
+                    g.setColour(fromU32(Col::textDim));
+                    g.setFont(secondsFont);
+                    const auto total = labelSeconds(barTime);
+                    bool drawn = false;
+                   #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+                    drawn = drawRulerDigits(g, secondsLabel, total / 60, total % 60);
+                   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                    juce::recordApexAndroidRulerLabel(0, drawn);
+                   #endif
+                   #endif
+                    if (!drawn)
+                        g.drawText(juce::String::formatted("%d:%02d", total / 60, total % 60),
+                                   secondsLabel, juce::Justification::centredLeft);
+                }
             }
 
-            double barTime = bar * barDuration;
-            int x = timeToX(barTime);
-
-            if (x < 0 || x > getWidth())
-                continue;
-
-            // Bar line — major divisions read above minor ones
-            g.setColour(fromU32(Col::gridLineMajor));
-            g.drawVerticalLine(x, 20.f, (float)getHeight());
-
-            // Bar number
-            g.setColour(fromU32(Col::text));
-            g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
-            g.drawText(juce::String(bar + 1), x + 2, 4, 40, 14,
-                       juce::Justification::centredLeft);
-
-            // Song-time seconds label (m:ss) — the user's audible clock
-            if (drawSeconds)
-            {
-                g.setColour(fromU32(Col::textDim));
-                g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
-                g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
-                           juce::Justification::centredLeft);
-            }
-
-            // Beat lines — suppressed when beats are too dense
-            if (noBeats)
+            if (!drawBeats || dirty.getBottom() <= 24)
                 continue;
 
             g.setColour(fromU32(Col::gridLine).withAlpha(0.3f));
             for (int beat = 1; beat < 4; ++beat)
             {
-                double beatTime = barTime + beat * beatDuration;
-                int beatX = timeToX(beatTime);
-                if (beatX >= 0 && beatX <= getWidth())
-                    g.drawVerticalLine(beatX, 24.f, (float)getHeight());
+                const int beatX = timeToX(barTime + beat * beatDuration);
+                if (beatX >= dirty.getX() && beatX < dirty.getRight())
+                    g.drawVerticalLine(beatX, 24.f, bottom);
             }
         }
     }
