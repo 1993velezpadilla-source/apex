@@ -3610,3 +3610,34 @@ constexpr bool mixerToolbarVerticalResizeKeepsActionsStable = []() constexpr {
     return true;
 }();
 static_assert(mixerToolbarVerticalResizeKeepsActionsStable);
+
+
+// Restored phone Mixer dimensions may be stale after rotation or split-screen.
+// Verify negative and extreme values cannot produce an offscreen toolbar hit
+// or accidentally expose an action when either axis is non-positive.
+constexpr bool mixerToolbarExtremeDimensionsStayBounded = []() constexpr {
+    constexpr int huge = std::numeric_limits<int>::max();
+    for (int width : { std::numeric_limits<int>::min(), -1, 0, 1,
+                       45, 46, 93, 94, 141, 142, huge })
+        for (int height : { std::numeric_limits<int>::min(), -1, 0,
+                            31, 32, 44, 128, huge })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            if (layout.count < 0 || layout.count > 3)
+                return false;
+            if ((width < 46 || height < 32) && layout.count != 0)
+                return false;
+            for (int i = 0; i < layout.count; ++i)
+            {
+                const auto hit = layout.buttons[i].bounds;
+                if (!inside(hit, width, height)
+                    || hit.width != 44 || hit.height != 32)
+                    return false;
+                if (i > 0 && hit.x < layout.buttons[i - 1].bounds.x
+                                         + layout.buttons[i - 1].bounds.width + 4)
+                    return false;
+            }
+        }
+    return true;
+}();
+static_assert(mixerToolbarExtremeDimensionsStayBounded);
