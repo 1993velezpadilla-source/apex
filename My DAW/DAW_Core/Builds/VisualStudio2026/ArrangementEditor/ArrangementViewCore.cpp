@@ -303,6 +303,10 @@ namespace ArrangementEditor
                 // Horizontal-only navigation still copies ZERO bitmap bytes.
                 if (nextFrame.getY() != frame.getY())
                 {
+                    // The overscan is horizontal. Drop pixels outside the
+                    // previous viewport before shifting rows. At fractional
+                    // DPI its clipped bottom row can become interior.
+                    valid.clipTo(toPixels(previousView, scale));
                     const auto overlap = valid.getBounds();
                     if (!overlap.isEmpty())
                     {
@@ -476,7 +480,7 @@ namespace ArrangementEditor
             const auto local = toPixels(overscannedView(), pixelScale);
             // Skip the antialiased boundary shared with the pinned ruler.
             // Only prepare within the existing ring and the clip overscan.
-            auto range = frame.withY(body.getY() + 1).withHeight(body.getHeight() - 1)
+            const auto range = frame.withY(body.getY() + 1).withHeight(body.getHeight() - 1)
                 .getIntersection(local);
             juce::RectangleList<int> missing(range);
             missing.subtract(visible.expanded(1, 0));
