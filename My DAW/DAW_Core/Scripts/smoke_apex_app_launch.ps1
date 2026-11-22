@@ -27,9 +27,27 @@ $smokes = @(
     @{ Flag = '--apex-ci-mixer-automation-ui'; Label = 'real MixerStrip automation mode and broadcast UI' }
 )
 
+if ($Configuration -eq 'Release') {
+    $reportDirectory = Join-Path $PSScriptRoot '..\evidence\runs\timeline-navigation'
+    New-Item -ItemType Directory -Force -Path $reportDirectory | Out-Null
+    $reportDirectory = (Resolve-Path -LiteralPath $reportDirectory).Path
+    $smokes += @(
+        @{ Flag = '--apex-ci-timeline-navigation --timeline-ruler'; Label = 'arranger ruler'; Report = 'ruler' },
+        @{ Flag = '--apex-ci-timeline-navigation'; Label = 'arranger with clip'; Report = 'clip' },
+        @{ Flag = '--apex-ci-timeline-navigation --timeline-deep'; Label = 'arranger at maximum zoom'; Report = 'deep' },
+        @{ Flag = '--apex-ci-timeline-navigation --timeline-playing'; Label = 'arranger during playback'; Report = 'playback' },
+        @{ Flag = '--apex-ci-timeline-navigation --timeline-recording'; Label = 'arranger during recording in a reopened project'; Report = 'recording' }
+    )
+}
+
 foreach ($smoke in $smokes) {
     $process = $null
+    $previousReport = $env:APEX_TIMELINE_NAV_REPORT
     try {
+        if ($smoke.Report) {
+            $env:APEX_TIMELINE_NAV_REPORT = Join-Path $reportDirectory "$($smoke.Report).json"
+            Remove-Item -LiteralPath $env:APEX_TIMELINE_NAV_REPORT -ErrorAction SilentlyContinue
+        }
         Write-Host "[app-smoke] Launching $Configuration|x64 $($smoke.Label): $exe"
         $process = Start-Process -FilePath $exe `
                                  -ArgumentList $smoke.Flag `
@@ -38,6 +56,20 @@ foreach ($smoke in $smokes) {
 
         if (-not $process.WaitForExit(90000)) {
             throw "$($smoke.Label) did not exit within the 90-second safety deadline."
+        }
+
+        if ($smoke.Report) {
+            if (-not (Test-Path -LiteralPath $env:APEX_TIMELINE_NAV_REPORT -PathType Leaf)) {
+                throw "Missing Windows arranger measurements ($($smoke.Report))."
+            }
+            $result = Get-Content -Raw -LiteralPath $env:APEX_TIMELINE_NAV_REPORT | ConvertFrom-Json
+            if ($result.error -or $result.phases.Count -ne 8) {
+                throw "Windows arranger replay failed ($($smoke.Report)) $($result.error)"
+            }
+            Write-Host "[arranger] $($smoke.Report) passed $($result.phases.Count) phases."
+            if ($smoke.Report -eq 'recording') {
+                Write-Host "[arranger] Verified $($result.verifiedRecordedFrames) WAV frames across $($result.restoredTracks) restored tracks. Engine callbacks over budget: $($result.callbackDeadlineMisses)."
+            }
         }
 
         if ($process.ExitCode -ne 0) {
@@ -62,6 +94,7 @@ foreach ($smoke in $smokes) {
         }
     }
     finally {
+        $env:APEX_TIMELINE_NAV_REPORT = $previousReport
         if ($null -ne $process) {
             if (-not $process.HasExited) {
                 Write-Warning "[app-smoke] Terminating hung DAW process $($process.Id)"

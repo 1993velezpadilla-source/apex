@@ -112,6 +112,17 @@ class MainComponent : public juce::Component,
                       private DAW::TransportController::Listener
 {
 public:
+   #if JUCE_WINDOWS
+    enum class TimelineBenchmarkTransport { Stopped, Playing, Recording };
+    bool prepareTimelineNavigationBenchmark(const juce::File& fixtureDirectory, bool deepZoom,
+                                            TimelineBenchmarkTransport mode, bool rulerReplay);
+    bool startTimelineNavigationBenchmarkTransport(TimelineBenchmarkTransport mode);
+    juce::var timelineNavigationBenchmarkState(bool finishPhase);
+    static constexpr int timelineBenchmarkSampleRate = 48000;
+    static constexpr int timelineBenchmarkBlockSize = 480;
+    void replayTimelineWheel(float horizontal, float vertical, juce::ModifierKeys modifiers);
+    void replayTimelineAudioBlock(const juce::AudioBuffer<float>* input, juce::AudioBuffer<float>& output);
+   #endif
     MainComponent();
     ~MainComponent() override;
 
@@ -479,14 +490,14 @@ private:
     void setDefaultMixerWindowBounds();
     bool deleteTrackOrFolder(const DAW::TrackID& trackId);
     void updateTimelineViewportContentBounds();
-    void sizeTimelineContent();
+    void sizeTimelineContent(bool updateHeight = true);
     void syncTimelineViewportPosition();
     void syncPlaylistTimeline();
 
     /** Last content-extent computed by updateTimelineViewportContentBounds();
      *  used to gate playhead-driven extent growth so the viewport bounds are
      *  not rebuilt on every transport tick. */
-    double lastTimelineContentLengthSeconds_ = 30.0;
+    double lastTimelineContentLengthSeconds_ = ArrangementEditor::TimelineZoomController::minimumTimelineSeconds;
 
     // RoutingGraph::Listener — real-time send graph updates
     void connectionAdded(DAW::RoutingConnection* conn) override;

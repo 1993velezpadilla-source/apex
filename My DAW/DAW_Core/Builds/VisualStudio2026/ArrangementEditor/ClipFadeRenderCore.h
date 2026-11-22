@@ -64,6 +64,8 @@ namespace ArrangementEditor
             if (fadeWidthPx <= 0.5f) return;
 
             const juce::Rectangle<float> fadeArea = clipBounds.withWidth(fadeWidthPx);
+            if (!g.clipRegionIntersects(fadeArea.expanded(2.0f).getSmallestIntegerContainer()))
+                return;
 
             // Dim wedge under the ramp = silenced part of the signal.
             juce::Path wedge;
@@ -95,6 +97,8 @@ namespace ArrangementEditor
             if (fadeWidthPx <= 0.5f) return;
 
             const juce::Rectangle<float> fadeArea = clipBounds.withLeft(clipBounds.getRight() - fadeWidthPx);
+            if (!g.clipRegionIntersects(fadeArea.expanded(2.0f).getSmallestIntegerContainer()))
+                return;
 
             juce::Path wedge;
             wedge.startNewSubPath(fadeArea.getRight(), fadeArea.getBottom());

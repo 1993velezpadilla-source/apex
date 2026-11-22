@@ -7,6 +7,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "ArrangementZoomCore.h"
+#include <array>
 #include <functional>
 
 namespace ArrangementEditor
@@ -19,7 +20,7 @@ namespace ArrangementEditor
         void setTempo(double bpm);
         void setPlayheadPosition(double timeSeconds);
         void setLoopRegion(double startTime, double endTime);
-        void setScrollOffsetX(int scrollOffsetX);
+        void setScrollOffsetX(int scrollOffsetX, bool boundsMovePending = false);
 
         void paint(juce::Graphics& g) override;
         void resized() override {}
@@ -32,6 +33,24 @@ namespace ArrangementEditor
         std::function<void(double, double)> onLoopRegionChanged;
 
     private:
+        class NumeralAtlas
+        {
+        public:
+            bool draw(juce::Graphics&, juce::Rectangle<int>, int number, int seconds = -1) const;
+            void prepare(float scale, const juce::Font&, juce::Colour, int lineHeight);
+
+        private:
+            struct Cell
+            {
+                juce::Image graphic;
+                float advance = 0.0f;
+            };
+            std::array<Cell, 11> m_cells;
+            float m_scale = 0.0f;
+        };
+
+        NumeralAtlas m_barNumerals;
+        NumeralAtlas m_timeNumerals;
         const TimelineZoomController& m_zoom;
 
         double m_bpm = 120.0;

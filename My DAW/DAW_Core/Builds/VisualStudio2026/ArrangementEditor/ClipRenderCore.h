@@ -78,6 +78,14 @@ namespace ArrangementEditor
                     || m_clipData.sourceEndSample != data.sourceEndSample
                     || m_clipData.processedWaveformVersion != data.processedWaveformVersion;
 
+                // A rename changes the text's true horizontal extent.
+                // Invalidate the preflight clip-name cull before the next
+                // paint, otherwise long labels could disappear offscreen.
+                if (m_clipData.clipName != data.clipName)
+                {
+                    measuredClipName = {};
+                    measuredClipNameWidth = 0;
+                }
                 m_clipData = data;
                 m_clipId   = data.id;
                 m_model    = &m_clipData;  // keep pointer valid
@@ -260,12 +268,13 @@ namespace ArrangementEditor
 
         // DEBUG: Paint counter to verify paint() is actually being called
         mutable int m_paintDebugCounter = 0;
-        int m_lastWaveformRequestWidth = -1;
-        bool m_lastWaveformRenderable = false;
 
         // NAME_H: height reserved at top for clip name label
         // Waveform starts below this so name never overlaps waveform.
         static constexpr int kNameH = 16;
+
+        juce::String measuredClipName;
+        int measuredClipNameWidth = 0;
 
         void drawBackground(juce::Graphics& g);
         void drawWaveform(juce::Graphics& g);

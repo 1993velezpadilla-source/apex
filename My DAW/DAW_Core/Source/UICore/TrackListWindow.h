@@ -21,6 +21,11 @@ public:
     explicit TrackListWindow(TrackList& content)
         : FloatingWindowBase("Tracks"), content_(content)
     {
+       #if JUCE_ANDROID || JUCE_WINDOWS
+        // Compose the track headers directly into the native peer. Stable
+        // TrackRows can still reuse their individual images during scroll.
+        setBufferedToImage(false);
+       #endif
         addAndMakeVisible(content_);
         setSize(240, 400);
     }

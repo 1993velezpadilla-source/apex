@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "../Builds/VisualStudio2026/ArrangementEditor/TouchNavigationMath.h"
 #include "StartupProgressCore.h"
 #include "KeyBindingCore/GlobalTransportSpaceHook.h"
 #include "AutomationSequence/AutomationSequenceDialogComponent.h"
@@ -465,38 +466,39 @@ public:
     {
         if (onZoomWheel && onZoomWheel(e, wheel))
             return;
-        // Vertical wheel scrolls lanes; Shift+wheel scrolls horizontally.
-        if (auto* c = getViewedComponent())
+        const auto* content = getViewedComponent();
+        if (content == nullptr)
+            return;
+
+        const auto start = getViewPosition();
+        const auto scale = ArrangementEditor::TimelineZoomController::Scale{
+            getPixelsPerSecond ? getPixelsPerSecond() : 0.0,
+            getLaneHeight ? getLaneHeight() : 0.0
+        };
+        const auto extent = juce::Point<int>{ content->getWidth(), content->getHeight() };
+        if (extent != wheelExtent_ || scale.pixelsPerSecond != wheelScale_.pixelsPerSecond
+            || scale.laneHeight != wheelScale_.laneHeight)
         {
-            const int contentW = juce::jmax(1, c->getWidth());
-            const int contentH = juce::jmax(1, c->getHeight());
-
-            const int viewW = juce::jmax(1, getViewWidth());
-            const int viewH = juce::jmax(1, getViewHeight());
-
-            auto pos = getViewPosition();
-
-            const float dx = wheel.deltaX;
-            const float dy = wheel.deltaY;
-
-            const bool shift = e.mods.isShiftDown();
-            const float primary = shift ? dx : dy;
-
-            // Normalize to pixels; keep it feeling consistent across wheel types.
-            const int step = (int)std::lround((float)(shift ? viewW : viewH) * primary * -0.65f);
-
-            if (step != 0)
-            {
-                if (shift)
-                    pos.x = juce::jlimit(0, juce::jmax(0, contentW - viewW), pos.x + step);
-                else
-                    pos.y = juce::jlimit(0, juce::jmax(0, contentH - viewH), pos.y + step);
-
-                setViewPosition(pos);
-            }
+            wheelCarry_ = {};
+            wheelExtent_ = extent;
+            wheelScale_ = scale;
         }
 
-        juce::Viewport::mouseWheelMove(e, wheel);
+        using ArrangementEditor::TouchNavigationMath;
+        const auto horizontal = TouchNavigationMath::finiteWheelDelta(wheel.deltaX);
+        auto next = start;
+        if (e.mods.isShiftDown())
+        {
+            const auto delta = horizontal != 0.0f ? horizontal : wheel.deltaY;
+            next.x = TouchNavigationMath::scrollWheelAxis(start.x, extent.x, getViewWidth(), delta, wheelCarry_.x);
+        }
+        else
+        {
+            next.x = TouchNavigationMath::scrollWheelAxis(start.x, extent.x, getViewWidth(), horizontal, wheelCarry_.x);
+            next.y = TouchNavigationMath::scrollWheelAxis(start.y, extent.y, getViewHeight(), wheel.deltaY, wheelCarry_.y);
+        }
+        if (next != start)
+            setViewPosition(next);
     }
 
 protected:
@@ -617,6 +619,10 @@ private:
     TimelineCornerZoomButton vZoomOutBtn_ { false };
     BarListener barListener_;
     bool layoutGuard_ = false;
+    juce::Point<double> wheelCarry_;
+    juce::Point<int> wheelExtent_;
+    ArrangementEditor::TimelineZoomController::Scale wheelScale_;
+
 };
 
 class TimelineTrackHeightHandle final : public juce::Component
@@ -2326,7 +2332,10 @@ MainComponent::MainComponent()
         if (!arrangement_ || !trackList_)
             return;
 
-        updateTimelineViewportContentBounds();
+        if (arrangement_->isApplyingZoom())
+            trackList_->beginTimelineHeightZoom();
+        else
+            updateTimelineViewportContentBounds();
 
         trackList_->setScrollOffset(arrangement_->getVerticalScrollOffset());
 
@@ -2884,11 +2893,15 @@ MainComponent::MainComponent()
     {
         return arrangement_ && arrangement_->zoomWheel(event, wheel);
     };
-    arrangement_->onZoomLayout = [this] { sizeTimelineContent(); };
+    arrangement_->onZoomLayout = [this](bool heightChanged) { sizeTimelineContent(heightChanged); };
     arrangement_->onZoomPresented = [this]
     {
         syncTimelineViewportPosition();
         syncPlaylistTimeline();
+    };
+    arrangement_->onTransportTick = [this]
+    {
+        positionChanged(appCore_.getTransport().getPosition());
     };
     timelineViewport_ = std::move(timelineViewport);
     timelineViewport_->getVerticalScrollBar().addListener(this);
@@ -7832,7 +7845,10 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     {
         if (auto* self = safeThis.getComponent())
             if (self->arrangement_)
+            {
                 self->arrangement_->setEngineSampleRate(sampleRate);
+                self->updateTimelineViewportContentBounds();
+            }
     });
 }
 
@@ -8952,20 +8968,22 @@ void MainComponent::syncTimelineViewportPosition()
         trackList_->setScrollOffset(origin.y);
 }
 
-void MainComponent::sizeTimelineContent()
+void MainComponent::sizeTimelineContent(bool updateHeight)
 {
     if (!arrangement_ || !timelineViewport_)
         return;
-    const int viewW = juce::jmax(1, timelineViewport_->getWidth());
-    const int viewH = juce::jmax(1, timelineViewport_->getHeight());
-    const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
-    int contentH = 80;
-    for (int i = 0; i < trackCount; ++i)
-        contentH += arrangement_->getLaneHeight(i);
-    const auto pps = arrangement_->getPixelsPerSecond();
-    arrangement_->setSize(ArrangementEditor::TimelineZoomController::contentWidth(
-                              juce::jmax(30.0, lastTimelineContentLengthSeconds_), pps, viewW),
-                          juce::jmax(viewH + 1, contentH));
+    const int width = ArrangementEditor::TimelineZoomController::contentWidth(
+        lastTimelineContentLengthSeconds_, arrangement_->getPixelsPerSecond(), timelineViewport_->getWidth());
+    int height = arrangement_->getHeight();
+    if (updateHeight)
+    {
+        int contentH = 80;
+        const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
+        for (int i = 0; i < trackCount; ++i)
+            contentH += arrangement_->getLaneHeight(i);
+        height = juce::jmax(juce::jmax(1, timelineViewport_->getHeight()) + 1, contentH);
+    }
+    arrangement_->setSize(width, height);
 }
 
 void MainComponent::updateTimelineViewportContentBounds()
@@ -8973,27 +8991,17 @@ void MainComponent::updateTimelineViewportContentBounds()
     if (!arrangement_)
         return;
 
-    double projectLengthSeconds = 30.0;
-    const auto sampleRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
+    using ArrangementEditor::TimelineZoomController;
+    const auto sampleRate = arrangement_->getEngineSampleRate();
+    double projectExtent = TimelineZoomController::minimumTimelineSeconds;
     for (auto* clip : appCore_.getClipManager().getAllClips())
-    {
-        if (clip == nullptr)
-            continue;
+        if (clip != nullptr)
+            projectExtent = juce::jmax(projectExtent, static_cast<double>(clip->getEndPosition()) / sampleRate + 2.0);
 
-        const double clipEndSeconds = (double)clip->getEndPosition() / sampleRate;
-        projectLengthSeconds = juce::jmax(projectLengthSeconds, clipEndSeconds + 2.0);
-    }
-
-    // The timeline must never clamp at the last clip: the playhead and the
-    // loop-region end also deserve scroll room, otherwise scrubbing/looping
-    // past the material hits a hard scrollbar limit.
-    projectLengthSeconds = juce::jmax(projectLengthSeconds,
-        (double) appCore_.getTransport().getPosition() / sampleRate + 2.0);
-    const auto loopRange = appCore_.getTransport().getLoopRange();
-    projectLengthSeconds = juce::jmax(projectLengthSeconds,
-        (double) loopRange.second / sampleRate + 2.0);
-    lastTimelineContentLengthSeconds_ = projectLengthSeconds;
-
+    const auto loop = appCore_.getTransport().getLoopRange();
+    projectExtent = juce::jmax(projectExtent, static_cast<double>(loop.second) / sampleRate + 2.0);
+    const double playheadSeconds = static_cast<double>(appCore_.getTransport().getPosition()) / sampleRate;
+    lastTimelineContentLengthSeconds_ = TimelineZoomController::timelineExtentSeconds(projectExtent, playheadSeconds);
     sizeTimelineContent();
     syncTimelineViewportPosition();
     syncPlaylistTimeline();
@@ -9001,14 +9009,21 @@ void MainComponent::updateTimelineViewportContentBounds()
 
 void MainComponent::positionChanged(DAW::SamplePosition newPosition)
 {
-    // Grow the timeline scroll extent when the playhead approaches or passes
-    // the current content end (ruler scrubbing, transport commands, looping).
-    // Guarded by the cached length so the viewport bounds are not rebuilt on
-    // every transport tick during playback.
-    const double sampleRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
-    const double playheadSeconds = (double) newPosition / sampleRate;
-    if (playheadSeconds + 2.0 > lastTimelineContentLengthSeconds_)
-        updateTimelineViewportContentBounds();
+    if (!arrangement_)
+        return;
+
+    // Playback and recording advance on the audio thread. As the viewport
+    // approaches its end, extend it on the existing presentation tick using
+    // the cached project extent. No clip scan is needed for a transport tick.
+    using ArrangementEditor::TimelineZoomController;
+    const auto extent = TimelineZoomController::timelineExtentSeconds(lastTimelineContentLengthSeconds_,
+        static_cast<double>(newPosition) / arrangement_->getEngineSampleRate());
+    if (extent > lastTimelineContentLengthSeconds_)
+    {
+        lastTimelineContentLengthSeconds_ = extent;
+        sizeTimelineContent(false);
+        syncTimelineViewportPosition();
+    }
 }
 
 void MainComponent::transportStateChanged()
@@ -9281,6 +9296,278 @@ void MainComponent::startPluginScanIfNeeded()
         appendMainStartupTrace("startPluginScanIfNeeded.after-startScan");
     });
 }
+
+#if JUCE_WINDOWS
+bool MainComponent::prepareTimelineNavigationBenchmark(const juce::File& fixtureDirectory, bool deepZoom,
+                                                       TimelineBenchmarkTransport mode, bool rulerReplay)
+{
+    if (!arrangement_ || !timelineViewport_ || !timelineWindow_ || !trackList_ || !trackListWindow_)
+        return false;
+    auto& project = appCore_.getProjectManager();
+    auto& clips = appCore_.getClipManager();
+    if (project.getProjectFile() != juce::File() || !clips.getAllClips().isEmpty())
+        return false;
+
+    startupPanelMayBeShown_ = false;
+    if (startupPanel_)
+        startupPanel_->dismiss();
+    if (mixerWindow_)
+        mixerWindow_->setVisible(false);
+    timelineWindow_->setVisible(true);
+
+    const bool recording = mode == TimelineBenchmarkTransport::Recording;
+    if (mode != TimelineBenchmarkTransport::Stopped)
+    {
+        // The replay supplies deterministic buffers to the device callback.
+        inputWatchdog_.stopTimer();
+        shutdownAudio();
+        const int inputChannels = recording ? 1 : 0;
+        cachedEnabledAudioInputChannels_.store(inputChannels, std::memory_order_release);
+        liveCallbackInputBuffer_.setSize(inputChannels, timelineBenchmarkBlockSize);
+        prepareToPlay(timelineBenchmarkBlockSize, timelineBenchmarkSampleRate);
+        arrangement_->setEngineSampleRate(timelineBenchmarkSampleRate);
+    }
+
+    auto& tracks = appCore_.getTrackManager();
+    const int numTracks = recording ? 24 : 12;
+    while (tracks.getNumTracks() < numTracks)
+        if (tracks.createTrack("UI benchmark lane") == nullptr)
+            return false;
+
+    if (!rulerReplay)
+    {
+        const auto file = fixtureDirectory.getChildFile("Backing.wav");
+        auto output = file.createOutputStream();
+        juce::WavAudioFormat format;
+        const double sr = arrangement_->getEngineSampleRate();
+        std::unique_ptr<juce::AudioFormatWriter> writer(output == nullptr ? nullptr
+            : format.createWriterFor(output.release(), sr, 1, 16, {}, 0));
+        if (writer == nullptr)
+            return false;
+
+        juce::AudioBuffer<float> block(1, 4096);
+        const int length = static_cast<int>(sr * 24.0);
+        const double amplitude = recording ? 0.01 : 0.7;
+        for (int start = 0; start < length; start += block.getNumSamples())
+        {
+            const int count = juce::jmin(block.getNumSamples(), length - start);
+            for (int i = 0; i < count; ++i)
+            {
+                const double t = (start + i) / sr;
+                block.setSample(0, i, static_cast<float>(amplitude * std::sin(t * 1382.30076758)
+                    * (0.2 + 0.8 * std::abs(std::sin(t * 2.3)))));
+            }
+            if (!writer->writeFromAudioSampleBuffer(block, 0, count))
+                return false;
+        }
+        writer.reset();
+
+        auto& media = appCore_.getAudioFileManager();
+        const auto insertAt = recording ? static_cast<DAW::SamplePosition>(sr * 28.0) : 0;
+        const int backingTracks = recording ? numTracks : 1;
+        for (int i = 0; i < backingTracks; ++i)
+        {
+            juce::Array<juce::File> files { file };
+            DAW::CommandManager::getInstance().execute(
+                std::make_unique<DAW::ImportAudioFilesCommand>(tracks, clips, media,
+                    std::move(files), tracks.getTrack(i)->getID(), insertAt, sr));
+        }
+        if (clips.getAllClips().size() != backingTracks)
+            return false;
+
+        if (recording)
+        {
+            constexpr float targetDb = -24.0f;
+            auto* normalized = dynamic_cast<DAW::AudioClip*>(clips.getAllClips()[0]);
+            if (normalized == nullptr)
+                return false;
+            const auto id = normalized->getID();
+            if (media.togglePeakNormalize(id, 0, length, targetDb)
+                != DAW::AudioFileManager::NormalizeResult::Applied)
+                return false;
+            normalized->setPeakNormalizeState(true, 0, length, targetDb);
+
+            const auto path = fixtureDirectory.getChildFile("Reopened session.dawproj");
+            if (!project.saveToFile(path) || !project.newProject() || !project.loadFromFile(path)
+                || tracks.getNumTracks() != numTracks || clips.getAllClips().size() != backingTracks)
+                return false;
+
+            const auto* restored = dynamic_cast<DAW::AudioClip*>(clips.getClip(id));
+            const auto* audio = media.getBuffer(id);
+            if (restored == nullptr || !restored->isPeakNormalizeActive() || audio == nullptr
+                || std::abs(audio->getMagnitude(0, audio->getNumSamples())
+                    - juce::Decibels::decibelsToGain(targetDb)) > 0.001f)
+                return false;
+        }
+    }
+
+    resized();
+    updateTimelineViewportContentBounds();
+    auto* core = arrangement_->getCore();
+    if (deepZoom)
+        core->zoomTo({ 9'000.0, 240.0 }, {});
+    if (rulerReplay)
+    {
+        // At 120 BPM this puts bar 34 at the left and bar 37 at the right.
+        const auto width = static_cast<double>(timelineViewport_->getViewWidth());
+        const auto pps = width / (2.0 * 3.68);
+        core->zoomTo({ pps, static_cast<double>(core->getZoom().getTrackHeightPx()) }, {});
+        timelineViewport_->setViewPosition(juce::roundToInt(66.0 * pps) - 4, 0);
+    }
+    if (recording)
+    {
+        auto* track = tracks.getTrack(0);
+        appCore_.getRecordingEngine().setProjectDirectory(fixtureDirectory);
+        track->setInputSource(0, true);
+        track->setRecordMode(DAW::TrackRecordMode::Dry);
+        track->setArmed(true);
+
+        // Scroll past the old bar-15 limit with a track recording over playback.
+        const auto sr = arrangement_->getEngineSampleRate();
+        appCore_.getTransport().setPosition(static_cast<DAW::SamplePosition>(sr * 29.0));
+        timelineViewport_->setViewPosition(
+            juce::roundToInt(28.5 * arrangement_->getPixelsPerSecond()), 0);
+    }
+
+    syncTimelineViewportPosition();
+    TimelinePaintMetrics::reset();
+    TimelinePaintMetrics::active.store(true, std::memory_order_relaxed);
+    repaint();
+    return true;
+}
+
+bool MainComponent::startTimelineNavigationBenchmarkTransport(TimelineBenchmarkTransport mode)
+{
+    auto& transport = appCore_.getTransport();
+    if (mode == TimelineBenchmarkTransport::Recording)
+    {
+        transport.record();
+        return appCore_.getRecordingEngine().isActivelyRecording();
+    }
+    if (mode == TimelineBenchmarkTransport::Playing)
+        transport.play();
+    return true;
+}
+
+juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
+{
+    auto* state = new juce::DynamicObject();
+    state->setProperty("scrollX", timelineViewport_ ? timelineViewport_->getViewPositionX() : -1);
+    state->setProperty("scrollY", timelineViewport_ ? timelineViewport_->getViewPositionY() : -1);
+    state->setProperty("viewWidth", timelineViewport_ ? timelineViewport_->getViewWidth() : 0);
+    state->setProperty("timelineContentSeconds", lastTimelineContentLengthSeconds_);
+    state->setProperty("timelineContentWidth", arrangement_ ? arrangement_->getWidth() : 0);
+    state->setProperty("pps", arrangement_ ? arrangement_->getPixelsPerSecond() : 0.0);
+    state->setProperty("laneHeight", arrangement_ ? arrangement_->getCore()->getZoom().getTrackHeightPx() : 0);
+    state->setProperty("tracksWindowBuffered",
+        trackListWindow_ && trackListWindow_->getCachedComponentImage() != nullptr);
+    state->setProperty("timelineWindowBuffered",
+        timelineWindow_ && timelineWindow_->getCachedComponentImage() != nullptr);
+    state->setProperty("directRowPaint", trackList_ && trackList_->isDirectHeightZoomPaintForBenchmark());
+    if (const auto* firstRow = trackList_ ? trackList_->getRow(0) : nullptr)
+        state->setProperty("trackHeaderHeight", firstRow->getHeight());
+    state->setProperty("clips", appCore_.getClipManager().getAllClips().size());
+   #if JUCE_WINDOWS
+    if (auto* peer = getPeer())
+        state->setProperty("backend", peer->getAvailableRenderingEngines()[peer->getCurrentRenderingEngine()]);
+   #elif JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+    const auto gpuFrames = androidGpuFrames_.rendered.load(std::memory_order_relaxed);
+    state->setProperty("backend", androidGpuContext_.isAttached() && gpuFrames > 0 ? "OpenGL" : "software");
+    state->setProperty("gpuFrames", gpuFrames);
+   #else
+    state->setProperty("backend", "software");
+   #endif
+    state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));
+    state->setProperty("waveformRefreshes", static_cast<juce::int64>(TimelinePaintMetrics::waveformRefreshes.load()));
+    state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
+    state->setProperty("waveformBatchedPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformBatchedPaints.load()));
+    state->setProperty("waveformPeaksWalked", static_cast<juce::int64>(TimelinePaintMetrics::waveformPeaksWalked.load()));
+    if (arrangement_ != nullptr)
+    {
+        const auto ready = arrangement_->getCore()->getVisibleWaveformReadinessForDiagnostics();
+        state->setProperty("visibleAudioWaveforms", ready.visibleAudioRenderers);
+        state->setProperty("readyAudioWaveforms", ready.ready);
+    }
+    state->setProperty("liveWaveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::liveRecordingWaveformPaints.load()));
+    state->setProperty("masterPreviewDirtyPixels", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewDirtyPixels.load()));
+    state->setProperty("masterPreviewUpdateCalls", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewUpdateCalls.load()));
+    state->setProperty("masterPreviewPaintCalls", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewPaintCalls.load()));
+    state->setProperty("masterPreviewRepaintCalls", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewRepaintCalls.load()));
+    state->setProperty("masterPreviewBinsDrawn", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewBinsDrawn.load()));
+    state->setProperty("scrollClipChecks", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollClipIterations.load()));
+    state->setProperty("rulerAtlasBuilds",
+        static_cast<juce::int64>(TimelinePaintMetrics::rulerAtlasBuilds.load()));
+    state->setProperty("rulerAtlasLabelDraws",
+        static_cast<juce::int64>(TimelinePaintMetrics::rulerAtlasLabelDraws.load()));
+    state->setProperty("rulerObservedLabels",
+        static_cast<juce::int64>(finishPhase ? TimelinePaintMetrics::rulerObservedLabels.load()
+                                            : TimelinePaintMetrics::rulerObservedLabels.exchange(0)));
+    state->setProperty("scrollEvents", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollEvents.load()));
+    auto& transport = appCore_.getTransport();
+    state->setProperty("playing", transport.isPlaying());
+    state->setProperty("recording", transport.isRecording());
+    state->setProperty("playheadFrames", static_cast<juce::int64>(transport.getPosition()));
+    if (auto* track = appCore_.getTrackManager().getTrack(0))
+    {
+        auto& waveform = track->getLiveRecordWaveform();
+        state->setProperty("recordedFrames", static_cast<juce::int64>(waveform.getRecordedSpan().length));
+        state->setProperty("recordingInputAvailable", waveform.isInputAvailable());
+    }
+    state->setProperty("windowWidth", getWidth());
+    state->setProperty("windowHeight", getHeight());
+    state->setProperty("timelineWidth", arrangement_ ? arrangement_->getWidth() : 0);
+    const auto addTiming = [&](const juce::Identifier& name, SampleRing& ring)
+    {
+        if (finishPhase)
+        {
+            const auto stats = ring.computePercentiles();
+            auto* timing = new juce::DynamicObject();
+            timing->setProperty("count", static_cast<int>(ring.size()));
+            timing->setProperty("p50", stats.p50_ns / 1.0e6);
+            timing->setProperty("p95", stats.p95_ns / 1.0e6);
+            timing->setProperty("worst", static_cast<double>(stats.worst_ns) / 1.0e6);
+            state->setProperty(name, juce::var(timing));
+        }
+        else
+        {
+            ring.reset();
+        }
+    };
+    addTiming("zoomMs", TimelinePaintMetrics::viewportZoomDurationNs);
+    addTiming("arrangerPaintMs", TimelinePaintMetrics::paintDurationNs);
+    addTiming("arrangerOverlayMs", TimelinePaintMetrics::paintChildrenDurationNs);
+    addTiming("waveformMs", TimelinePaintMetrics::waveformDurationNs);
+    addTiming("masterPreviewUpdateMs", TimelinePaintMetrics::masterPreviewUpdateDurationNs);
+    addTiming("masterPreviewPaintMs", TimelinePaintMetrics::masterPreviewPaintDurationNs);
+    addTiming("clipNameMs", TimelinePaintMetrics::clipNameDurationNs);
+    return juce::var(state);
+}
+#endif
+
+#if JUCE_WINDOWS
+void MainComponent::replayTimelineWheel(float horizontal, float vertical, juce::ModifierKeys modifiers)
+{
+    auto* core = arrangement_->getCore();
+    const auto focusInView = timelineViewport_->getLocalBounds().getCentre();
+    const auto focus = core->getLocalPoint(timelineViewport_.get(), focusInView).toFloat();
+    const auto now = juce::Time::getCurrentTime();
+    const juce::MouseEvent event(juce::Desktop::getInstance().getMainMouseSource(), focus,
+        modifiers, 0.f, 0.f, 0.f, 0.f, 0.f, core, core, now, focus, now, 0, false);
+    juce::MouseWheelDetails wheel {};
+    wheel.deltaX = horizontal;
+    wheel.deltaY = vertical;
+    wheel.isSmooth = true;
+    core->mouseWheelMove(event, wheel);
+}
+
+void MainComponent::replayTimelineAudioBlock(const juce::AudioBuffer<float>* input,
+                                             juce::AudioBuffer<float>& output)
+{
+    audioDeviceIOCallbackWithContext(input ? input->getArrayOfReadPointers() : nullptr,
+        input ? input->getNumChannels() : 0, output.getArrayOfWritePointers(),
+        output.getNumChannels(), output.getNumSamples(), {});
+}
+#endif
 
 void MainComponent::openPianoRollForClip(DAW::MidiClip& clip)
 {

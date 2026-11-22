@@ -3,6 +3,8 @@
 // Drawing policies shared by the ruler and clip renderers.
 // ===========================================================================
 #pragma once
+#include <algorithm>
+#include <limits>
 #include "TimelineZoomController.h"
 
 namespace ArrangementEditor
@@ -27,21 +29,29 @@ namespace ArrangementEditor
         /** True when beat subdivision lines should be suppressed entirely. */
         static bool suppressBeats(double pixelsPerBeat) noexcept
         {
-            return pixelsPerBeat < kMinPxPerBeat;
+            // Invalid density must not enable unreadable beat subdivisions.
+            return !(pixelsPerBeat >= kMinPxPerBeat);
         }
 
         /** Musically natural bar step for the given pixel density.
-         *  Guarantees major spacing >= kMinMajorSpacing. */
+         *  Cap the step at 32 bars. Compare spacing thresholds directly:
+         *  ceil(24 / pxPerBar) can overflow int at extreme zoom-out or
+         *  convert NaN to int after malformed tempo/viewport input. */
         static int barStep(double pixelsPerBar) noexcept
         {
-            if (pixelsPerBar <= 0.0) return 1;
-            const int raw = static_cast<int>(std::ceil(kMinMajorSpacing / pixelsPerBar));
-            if (raw <= 1) return 1;
-            if (raw <= 2) return 2;
-            if (raw <= 4) return 4;
-            if (raw <= 8) return 8;
-            if (raw <= 16) return 16;
+            if (!(pixelsPerBar > 0.0)) return 1; // also rejects NaN
+            if (pixelsPerBar >= kMinMajorSpacing) return 1;
+            if (pixelsPerBar >= kMinMajorSpacing / 2.0) return 2;
+            if (pixelsPerBar >= kMinMajorSpacing / 4.0) return 4;
+            if (pixelsPerBar >= kMinMajorSpacing / 8.0) return 8;
+            if (pixelsPerBar >= kMinMajorSpacing / 16.0) return 16;
             return 32;
+        }
+
+        static int barLabelStep(double pixelsPerBar) noexcept
+        {
+            constexpr double labelWidth = 40.0;
+            return barStep(pixelsPerBar * (kMinMajorSpacing / labelWidth));
         }
     };
 
@@ -92,13 +102,79 @@ namespace ArrangementEditor
             return width >= kWaveformMinWidthPx && height >= kFadeMinHeightPx;
         }
 
+        static juce::Rectangle<int> renderRegion(const juce::Rectangle<int>& viewport,
+                                                  int trackHeightPx) noexcept
+        {
+            // Prepare clips ahead of a pan in either direction. A viewport
+            // can travel much farther than 32 px between touch frames.
+            return viewport.expanded(juce::jmax(kViewportOverscanPx, viewport.getWidth() / 2),
+                                     juce::jmax(kViewportOverscanPx, trackHeightPx));
+        }
+
+        static juce::Rectangle<int> visibilityGuard(const juce::Rectangle<int>& viewport,
+                                                     int contentWidth, int trackHeightPx) noexcept
+        {
+            const int verticalTravel = juce::jmax(kViewportOverscanPx / 2, trackHeightPx / 2);
+            // This cached guard must also include a horizontal runway when
+            // the content is only as wide as the viewport (detached editors,
+            // just-created recordings, or a viewport near the right edge).
+            // Previously its right edge equalled viewport.getRight(), so
+            // EVERY 8px pan event scanned the full clip-renderer vector.
+            // Actual hidden clips still narrow this interval below through
+            // excludeHiddenClip(), keeping visibility transitions correct.
+            const auto horizontalTravel = juce::jmax(kViewportOverscanPx, viewport.getWidth() / 2);
+            const auto safeRight = static_cast<int>(std::min<long long>(
+                std::numeric_limits<int>::max() / 2,
+                static_cast<long long>(viewport.getRight()) + horizontalTravel));
+            return viewport.expanded(0, verticalTravel)
+                .withX(0).withWidth(juce::jmax(contentWidth, safeRight));
+        }
+
+        // The cached guard is a region of VIEWPORT ORIGINS for which the
+        // renderer visibility computed at the previous origin remains valid.
+        // A hidden clip can become eligible as soon as it touches the expanded
+        // prefetch region, not only after it touches the visible viewport.
+        // In particular, trimming at clip.getX() while forgetting horizontal
+        // prefetch delayed clip activation by half a screen of scrolling.
+        //
+        // Prefer a VERTICAL separation whenever one exists: clips on other
+        // tracks must never force horizontal re-scans during a horizontal pan.
+        // The chosen separating axis is sufficient even for diagonal pans.
+        static void excludeHiddenClip(juce::Rectangle<int>& guard,
+                                      const juce::Rectangle<int>& viewport,
+                                      const juce::Rectangle<int>& clip,
+                                      int trackHeightPx) noexcept
+        {
+            const auto region = renderRegion(viewport, trackHeightPx);
+            if (region.intersects(clip))
+                return;
+
+            const int marginX = juce::jmax(kViewportOverscanPx, viewport.getWidth() / 2);
+            const int marginY = juce::jmax(kViewportOverscanPx, trackHeightPx);
+            // Keep the margins well within the JUCE integer coordinate domain.
+            const auto safeEdge = [](int edge, int margin) noexcept -> int
+            {
+                return static_cast<int>(std::clamp(
+                    static_cast<long long>(edge) + margin,
+                    static_cast<long long>(std::numeric_limits<int>::min() / 2),
+                    static_cast<long long>(std::numeric_limits<int>::max() / 2)));
+            };
+
+            if (clip.getBottom() <= region.getY())
+                guard = guard.withTop(juce::jmax(guard.getY(), safeEdge(clip.getBottom(), marginY)));
+            else if (clip.getY() >= region.getBottom())
+                guard = guard.withBottom(std::min(guard.getBottom(), safeEdge(clip.getY(), -marginY)));
+            else if (clip.getRight() <= region.getX())
+                guard = guard.withLeft(juce::jmax(guard.getX(), safeEdge(clip.getRight(), marginX)));
+            else if (clip.getX() >= region.getRight())
+                guard = guard.withRight(std::min(guard.getRight(), safeEdge(clip.getX(), -marginX)));
+        }
+
         static bool intersectsViewport(const juce::Rectangle<int>& clipBounds,
                                        const juce::Rectangle<int>& viewport,
                                        int trackHeightPx) noexcept
         {
-            const int overscanY = juce::jmax(kViewportOverscanPx, trackHeightPx);
-            return viewport.expanded(kViewportOverscanPx, overscanY)
-                .intersects(clipBounds);
+            return renderRegion(viewport, trackHeightPx).intersects(clipBounds);
         }
 
     private:

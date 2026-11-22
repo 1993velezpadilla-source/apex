@@ -63,6 +63,7 @@ namespace DAW
     class ClipRegionPluginCore;
 }
 
+
 namespace ArrangementEditor
 {
     class ArrangementViewCore : public juce::Component,
@@ -327,7 +328,7 @@ namespace ArrangementEditor
         /**
          * Update layout of all automation containers.
          */
-        void updateAutomationLayout();
+        void updateAutomationLayout(bool restack = true);
 
         int getYForTrackId(const DAW::TrackID& trackId) const;
         int getYForTrack(const DAW::TrackID& trackId) const { return getYForTrackId(trackId); }
@@ -458,7 +459,6 @@ namespace ArrangementEditor
         void queueZoom(TimelineZoomController::Request, bool nextFrame);
         void presentPendingZoom();
         juce::Rectangle<int> projectClipBounds(const ArrangementClipModel&) const;
-        void projectClips();
         ArrangementUndoCore      m_undo;
         EditorToolState          m_toolState;
 
@@ -483,6 +483,7 @@ namespace ArrangementEditor
         // Drawn from paintOverChildren() so the opaque HeaderClipGuard child
         // cannot hide it.
         void drawLockButton(juce::Graphics& g);
+        void paintTimelineForeground(juce::Graphics& g);
 
         // ── Free View Mode button (view-only: scroll/zoom, no editing) ──
         juce::Rectangle<int> m_viewOnlyBtnBounds;
@@ -615,10 +616,11 @@ namespace ArrangementEditor
         bool isAutomationComponentAt(juce::Point<int> pos) const;
         bool isAutomationInteractionBlockingClipAt(juce::Point<int> pos) const;
         void updateClipAutomationDim();
-        void updatePinnedViewportControls();
+        void updatePinnedViewportControls(bool restack = true);
         juce::Rectangle<int> getViewportVisibleBounds() const;
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
-        void updateClipRendererVisibility();
+        enum class ClipBoundsUpdate { none, time, all };
+        void updateClipRendererVisibility(ClipBoundsUpdate update = ClipBoundsUpdate::none);
         ClipRenderCore* findClipRendererAt(juce::Point<int> pos);
         ClipRenderCore* findClipRendererFor(const juce::Uuid& clipId) const;
         ArrangementClipModel* findClipAt(juce::Point<int> pos);
@@ -687,7 +689,7 @@ namespace ArrangementEditor
         // GUI-thread observation only: audio-track output meters >0 dBFS
         // while its single active clip is playing. Never prelabel cached
         // source waveform peaks as audible output clipping.
-        std::map<juce::String, std::set<int64_t>> m_playbackClippedClipBins;
+        std::map<juce::Uuid, std::set<int64_t>> m_playbackClippedClipBins;
         bool m_masterPreviewWasPlaying = false;
         void drawReadOnlyMasterPreview(juce::Graphics& g);
 
@@ -796,6 +798,7 @@ namespace ArrangementEditor
         int m_viewportScrollX = 0;
         int m_viewportScrollY = 0;
         bool m_inViewportScroll = false;
+        juce::Rectangle<int> m_clipVisibilityGuard;
         bool m_middleMousePanActive = false;
         juce::Point<int> m_middleMousePanScreenPos;
 

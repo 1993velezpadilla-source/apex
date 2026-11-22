@@ -284,46 +284,47 @@ public:
         g.setColour(a.color.borderSoftB);
         g.fillRect(0.f, b.getBottom() - 2.f, b.getWidth(), 2.f);
 
-        // Position readout — dark well, hairline border.
-        // Line 1: bars:beats (musical position). Line 2: the playhead clock
-        // (HH:MM:SS.mmm) so the user always sees the song time in seconds,
-        // synced to the same transport position — like every DAW.
-        auto tb = posReadoutBounds_.toFloat().reduced(0, 4);
-        g.setColour(a.color.deepestA);
-        g.fillRoundedRectangle(tb, a.metric.radiusControl);
-        g.setColour(a.color.borderSoftA);
-        g.drawRoundedRectangle(tb, a.metric.radiusControl, a.metric.strokeThin);
+        if (g.clipRegionIntersects(posReadoutBounds_))
+        {
+            // Position readout — dark well, hairline border.
+            // Line 1: bars:beats (musical position). Line 2: the playhead clock
+            // (HH:MM:SS.mmm) so the user always sees the song time in seconds,
+            // synced to the same transport position — like every DAW.
+            auto tb = posReadoutBounds_.toFloat().reduced(0, 4);
+            g.setColour(a.color.deepestA);
+            g.fillRoundedRectangle(tb, a.metric.radiusControl);
+            g.setColour(a.color.borderSoftA);
+            g.drawRoundedRectangle(tb, a.metric.radiusControl, a.metric.strokeThin);
 
-        double pos  = transport_.getPositionBarBeat();
-        int    bar  = (int)pos + 1;
-        int    beat = (int)((pos - (int)pos) * 4.0) + 1;
+            const auto readout = readoutPosition();
 
-        const float readoutH = tb.getHeight();
-        auto barBeatArea = tb.removeFromTop(readoutH * 0.52f);
+            const float readoutH = tb.getHeight();
+            auto barBeatArea = tb.removeFromTop(readoutH * 0.52f);
 
-        // Bar/beat LED — magenta creative-energy emphasis (real transport value)
-        g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 13.f, juce::Font::bold));
-        g.setColour(a.color.magentaBright.withAlpha(0.20f));
-        auto posStr = juce::String::formatted("%03d : %d", bar, beat);
-        g.drawText(posStr, barBeatArea.translated(0, 1), juce::Justification::centred);
-        g.setColour(a.color.magentaBright);
-        g.drawText(posStr, barBeatArea, juce::Justification::centred);
+            // Bar/beat LED — magenta creative-energy emphasis (real transport value)
+            static const juce::Font barBeatFont(juce::Font::getDefaultMonospacedFontName(), 13.f, juce::Font::bold);
+            g.setFont(barBeatFont);
+            g.setColour(a.color.magentaBright.withAlpha(0.20f));
+            auto posStr = juce::String::formatted("%03d : %d", readout.bar, readout.beat);
+            g.drawText(posStr, barBeatArea.translated(0, 1), juce::Justification::centred);
+            g.setColour(a.color.magentaBright);
+            g.drawText(posStr, barBeatArea, juce::Justification::centred);
 
-        // Playhead clock — HH:MM:SS.mmm, cyan signal LED, monospaced tabular
-        double sampleRate = sampleRateProvider ? sampleRateProvider() : 44100.0;
-        const int64_t totalMs = (int64_t) juce::jmax(0.0,
-            (double) transport_.getPosition() / juce::jmax(1.0, sampleRate) * 1000.0);
-        const int hh = (int) (totalMs / 3600000);
-        const int mm = (int) ((totalMs / 60000) % 60);
-        const int ss = (int) ((totalMs / 1000) % 60);
-        const int ms = (int) (totalMs % 1000);
-        const auto clockStr = juce::String::formatted("%02d:%02d:%02d.%03d", hh, mm, ss, ms);
+            // Playhead clock — HH:MM:SS.mmm, cyan signal LED, monospaced tabular
+            const auto totalMs = readout.milliseconds;
+            const int hh = (int) (totalMs / 3600000);
+            const int mm = (int) ((totalMs / 60000) % 60);
+            const int ss = (int) ((totalMs / 1000) % 60);
+            const int ms = (int) (totalMs % 1000);
+            const auto clockStr = juce::String::formatted("%02d:%02d:%02d.%03d", hh, mm, ss, ms);
 
-        g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 11.f, juce::Font::bold));
-        g.setColour(a.color.cyan.withAlpha(0.20f));
-        g.drawText(clockStr, tb.translated(0, 1), juce::Justification::centred);
-        g.setColour(a.color.cyan);
-        g.drawText(clockStr, tb, juce::Justification::centred);
+            static const juce::Font clockFont(juce::Font::getDefaultMonospacedFontName(), 11.f, juce::Font::bold);
+            g.setFont(clockFont);
+            g.setColour(a.color.cyan.withAlpha(0.20f));
+            g.drawText(clockStr, tb.translated(0, 1), juce::Justification::centred);
+            g.setColour(a.color.cyan);
+            g.drawText(clockStr, tb, juce::Justification::centred);
+        }
 
         // Quick-access panel buttons with icons — shared control-state language
         auto mouse = getMouseXYRelative().toFloat();
@@ -498,10 +499,38 @@ public:
         if (recBtn_)   recBtn_->setActive(transport_.isRecording());
         if (loopBtn_)  loopBtn_->setActive(transport_.isLooping());
         if (returnBtn_) returnBtn_->setActive(transport_.shouldReturnToLastPosition());
-        repaint(posReadoutBounds_);
+        const auto readout = readoutPosition();
+        if (!(readout == lastReadout_))
+        {
+            lastReadout_ = readout;
+            repaint(posReadoutBounds_);
+        }
     }
 
 private:
+    struct PositionReadout
+    {
+        int bar = 0;
+        int beat = 0;
+        int64_t milliseconds = -1;
+
+        bool operator==(const PositionReadout& other) const noexcept
+        {
+            return bar == other.bar && beat == other.beat && milliseconds == other.milliseconds;
+        }
+    };
+
+    PositionReadout readoutPosition() const
+    {
+        const auto pos = transport_.getPositionBarBeat();
+        const auto wholeBars = static_cast<int>(pos);
+        const auto sampleRate = sampleRateProvider ? sampleRateProvider() : 44100.0;
+        const auto milliseconds = static_cast<int64_t>(juce::jmax(0.0,
+            static_cast<double>(transport_.getPosition()) / juce::jmax(1.0, sampleRate) * 1000.0));
+        return { wholeBars + 1, static_cast<int>((pos - wholeBars) * 4.0) + 1, milliseconds };
+    }
+
+    PositionReadout lastReadout_;
     TransportController& transport_;
     TempoDisplay         tempo_;
     ProjectKeyDisplay    projectKey_;

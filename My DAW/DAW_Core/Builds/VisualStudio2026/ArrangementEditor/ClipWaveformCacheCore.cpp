@@ -53,21 +53,26 @@ namespace ArrangementEditor
     void ClipWaveformCacheCore::requestPeaks(const std::string& sourcePath, int targetWidth,
                                              int64_t visibleSamplesHint)
     {
+        std::shared_ptr<const WaveformPeakData> published;
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
             cachedOverviewSource_.reset();
+            // Retire the old source snapshot without modifying anything a
+            // painting UI frame might still be reading.
+            if (m_sourcePath != sourcePath)
+                m_peaks.reset();
+            published = m_peaks;
         }
-        if (m_sourcePath == sourcePath && m_peaks.valid)
+        if (m_sourcePath == sourcePath && published && published->valid)
         {
             m_targetWidth = targetWidth;
             m_visibleSamplesHint = visibleSamplesHint;
 
-            // Re-generate only when the cache is meaningfully coarser than
-            // this zoom level needs (1.5x hysteresis prevents regen thrash).
-            const int required = computeSamplesPerPeak(m_peaks.totalSamples,
+            // Re-generate only if the stored peak resolution is >1.5x coarse.
+            const int required = computeSamplesPerPeak(published->totalSamples,
                                                        targetWidth, visibleSamplesHint);
-            if ((juce::int64)m_peaks.samplesPerPeak <= (juce::int64)required * 3 / 2)
-                return; // cached resolution is fine for this zoom
+            if ((juce::int64)published->samplesPerPeak <= (juce::int64)required * 3 / 2)
+                return;
 
             m_requestPending = true;
             if (!isThreadRunning())
@@ -75,10 +80,6 @@ namespace ArrangementEditor
             notify();
             return;
         }
-
-        // New source: invalidate immediately so stale audio never paints.
-        if (m_sourcePath != sourcePath)
-            m_peaks.valid = false;
 
         m_sourcePath = sourcePath;
         m_targetWidth = targetWidth;
@@ -95,11 +96,9 @@ namespace ArrangementEditor
         if (!cachedAudio)
             return false;
 
-        {
-            juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            if (cachedOverviewSource_ == cachedAudio && m_peaks.valid)
-                return true;
-        }
+        juce::CriticalSection::ScopedLockType lock(peaksLock_);
+        if (cachedOverviewSource_ == cachedAudio && m_peaks && m_peaks->valid)
+            return true;
 
         const auto& rawMin = cachedAudio->getRawMinRef();
         const auto& rawMax = cachedAudio->getRawMaxRef();
@@ -108,19 +107,16 @@ namespace ArrangementEditor
             return false;
 
         WaveformPeakData fresh;
-        fresh.minPeaks = rawMin;
-        fresh.maxPeaks = rawMax;
-        for (int i = 0; i < (int) rawMin.size(); ++i)
-            if (rawMin[(size_t) i] <= -1.0f || rawMax[(size_t) i] >= 1.0f)
-                fresh.clippedPeaks.push_back(i);
+        // The audio manager has already analysed this source. Split clips
+        // can share those immutable peaks even as they enter the viewport.
+        fresh.overview = cachedAudio;
         fresh.totalSamples = totalSamples;
         fresh.sourceSampleRate = cachedAudio->sampleRate > 0.0 ? cachedAudio->sampleRate : 44100.0;
         fresh.samplesPerPeak = juce::jmax(1, (int) std::ceil(
             (double) totalSamples / (double) rawMin.size()));
         fresh.valid = true;
 
-        juce::CriticalSection::ScopedLockType lock(peaksLock_);
-        m_peaks = std::move(fresh);
+        m_peaks = std::make_shared<const WaveformPeakData>(std::move(fresh));
         cachedOverviewSource_ = cachedAudio;
         return true;
     }
@@ -132,27 +128,14 @@ namespace ArrangementEditor
             wait(500);
 
             // Buffer-based request (from OfflineHQ cache / bounce) takes priority
+            if (generatePendingBufferPeaks())
             {
-                juce::ScopedLock sl(bufferLock_);
-                if (hasPendingBuffer_ && !threadShouldExit())
-                {
-                    hasPendingBuffer_ = false;
-                    generatePeaksFromBuffer();
-
-                    if (onPeaksReady)
-                    {
-                        std::weak_ptr<void> weak = lifetimeToken_;
-                        const juce::String filePath("buffer");
-                        juce::MessageManager::callAsync([weak, this, filePath]() {
-                            if (weak.lock())
-                            {
-                                DBG("[CRASH TRACE] action=waveform_async_complete file=" << filePath);
-                                if (onPeaksReady) onPeaksReady();
-                            }
-                        });
-                    }
-                    continue;
-                }
+                std::weak_ptr<void> weak = lifetimeToken_;
+                juce::MessageManager::callAsync([weak, this]() {
+                    if (weak.lock() && onPeaksReady)
+                        onPeaksReady();
+                });
+                continue;
             }
 
             if (m_requestPending && !threadShouldExit())
@@ -183,7 +166,7 @@ namespace ArrangementEditor
         if (!file.existsAsFile())
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks.reset();
             return;
         }
 
@@ -194,7 +177,7 @@ namespace ArrangementEditor
         if (!reader)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks.reset();
             return;
         }
 
@@ -202,7 +185,7 @@ namespace ArrangementEditor
         if (totalSamples <= 0 || m_targetWidth <= 0)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks.reset();
             return;
         }
 
@@ -268,9 +251,9 @@ namespace ArrangementEditor
         // This ensures paint() never accesses partially-written peak data
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks.reset();
             fresh.valid = true;
-            m_peaks = std::move(fresh);
+            m_peaks = std::make_shared<const WaveformPeakData>(std::move(fresh));
         }
     }
 
@@ -279,19 +262,29 @@ namespace ArrangementEditor
     // Called after OfflineHQ render completes or clip is bounced.
     // Shows the PROCESSED waveform (with stretch applied visually).
     // -----------------------------------------------------------------------
-    void ClipWaveformCacheCore::generatePeaksFromBuffer()
+    bool ClipWaveformCacheCore::generatePendingBufferPeaks()
     {
-        juce::ScopedLock sl(bufferLock_);
-        const int totalSamples = pendingBuffer_.getNumSamples();
-        const int channels     = pendingBuffer_.getNumChannels();
-        if (totalSamples <= 0 || channels <= 0 || m_targetWidth <= 0)
-            return;
+        juce::AudioBuffer<float> buffer;
+        int targetWidth = 0;
+        {
+            juce::ScopedLock lock(bufferLock_);
+            if (!hasPendingBuffer_ || threadShouldExit())
+                return false;
+            hasPendingBuffer_ = false;
+            buffer = std::move(pendingBuffer_);
+            targetWidth = pendingBufferWidth_;
+        }
+
+        const int totalSamples = buffer.getNumSamples();
+        const int channels = buffer.getNumChannels();
+        if (totalSamples <= 0 || channels <= 0 || targetWidth <= 0)
+            return true;
 
         // Build peaks in local struct first, then lock when updating m_peaks
         WaveformPeakData fresh;
         fresh.totalSamples = totalSamples;
 
-        const int samplesPerPeak = juce::jmax(1, totalSamples / m_targetWidth);
+        const int samplesPerPeak = juce::jmax(1, totalSamples / targetWidth);
         fresh.samplesPerPeak   = samplesPerPeak;
         const int numPeaks       = totalSamples / samplesPerPeak;
 
@@ -306,7 +299,7 @@ namespace ArrangementEditor
             float minVal = 0.f, maxVal = 0.f;
             for (int ch = 0; ch < channels; ++ch)
             {
-                const auto range = pendingBuffer_.findMinMax(ch, start, len);
+                const auto range = buffer.findMinMax(ch, start, len);
                 minVal = juce::jmin(minVal, range.getStart());
                 maxVal = juce::jmax(maxVal, range.getEnd());
             }
@@ -314,12 +307,16 @@ namespace ArrangementEditor
             fresh.maxPeaks[i] = maxVal;
         }
 
-        // Thread-safe update: lock while swapping in the new data
+        // A new request can arrive while peaks are computed. Keep the
+        // previous display until the latest buffer has been processed.
+        juce::ScopedLock pendingLock(bufferLock_);
+        if (!hasPendingBuffer_ && !threadShouldExit())
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
             fresh.valid = true;
-            m_peaks = std::move(fresh);
+            m_peaks = std::make_shared<const WaveformPeakData>(std::move(fresh));
         }
+        return true;
     }
 
 } // namespace ArrangementEditor

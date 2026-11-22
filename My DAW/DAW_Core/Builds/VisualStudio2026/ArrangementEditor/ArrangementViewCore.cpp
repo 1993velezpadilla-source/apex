@@ -29,6 +29,7 @@
 #include <functional>
 #include <limits>
 
+
 namespace ArrangementEditor
 {
     namespace Col
@@ -170,6 +171,8 @@ namespace ArrangementEditor
             return fallback.brighter(0.25f);
         }
     }
+
+
 
     ArrangementViewCore::ArrangementViewCore()
         : m_toolbar(m_toolState)
@@ -576,120 +579,37 @@ namespace ArrangementEditor
         };
     }
 
-    // ── Playhead dirty-rect helpers for F1 bounded repaint ────────────
-    namespace {
-        // Body playhead area: 1px line + 5px glow (x-2..x+2) + 1px AA margin.
-        // Covers the timeline body below the ruler only.
-        constexpr int kPlayheadBodyHalfWidth = 3;
-
-        // Ruler playhead area: 1px line + 10px triangle (x-5..x+5) + 1px AA margin.
-        // Covers the entire ruler height.
-        constexpr int kPlayheadRulerHalfWidth = 6;
-
-        /** Returns a dirty rectangle for the body playhead at |playheadX|
-         *  (core-local X coordinate). The rect is clamped to the body area
-         *  (top … bottom, componentWidth × componentHeight).
-         *  Returns an empty rect when the playhead is entirely outside bounds. */
-        juce::Rectangle<int> playheadBodyDirtyRect(
-            int playheadX, int top, int bottom,
-            int componentWidth, int componentHeight) noexcept
-        {
-            const auto body = juce::Rectangle<int>(
-                0, top, componentWidth, componentHeight - top);
-            const auto glow = juce::Rectangle<int>(
-                playheadX - kPlayheadBodyHalfWidth, top,
-                kPlayheadBodyHalfWidth * 2 + 1,
-                juce::jmax(0, bottom - top));
-            return glow.getIntersection(body);
-        }
-
-        /** Returns a dirty rectangle for the ruler playhead at |playheadX|
-         *  (ruler-local X coordinate). Clamped to the ruler's local bounds.
-         *  Returns an empty rect when the playhead is entirely outside bounds. */
-        juce::Rectangle<int> playheadRulerDirtyRect(
-            int playheadX, int rulerWidth, int rulerHeight) noexcept
-        {
-            const auto bounds = juce::Rectangle<int>(0, 0, rulerWidth, rulerHeight);
-            const auto glow = juce::Rectangle<int>(
-                playheadX - kPlayheadRulerHalfWidth, 0,
-                kPlayheadRulerHalfWidth * 2 + 1, rulerHeight);
-            return glow.getIntersection(bounds);
-        }
-
-        /** Issues one or two partial-repaint rects for old and new playhead
-         *  positions.  When the two rects are the same or overlapping, JUCE
-         *  coalesces them into a single repaint region. */
-        void repaintPlayheadPositions(
-            juce::Component& comp,
-            int oldX, int newX,
-            int top, int bottom,
-            int compWidth, int compHeight) noexcept
-        {
-            if (oldX == newX)
-            {
-                auto r = playheadBodyDirtyRect(newX, top, bottom, compWidth, compHeight);
-                if (!r.isEmpty()) comp.repaint(r);
-                return;
-            }
-            auto oldR = playheadBodyDirtyRect(oldX, top, bottom, compWidth, compHeight);
-            if (!oldR.isEmpty()) comp.repaint(oldR);
-            auto newR = playheadBodyDirtyRect(newX, top, bottom, compWidth, compHeight);
-            if (!newR.isEmpty()) comp.repaint(newR);
-        }
-
-        /** Records partial-repaint dirty-area metrics for old and new positions. */
-        void recordPlayheadDirtyAreaMetrics(
-            int oldX, int newX,
-            int top, int bottom,
-            int compWidth, int compHeight) noexcept
-        {
-            auto recordOne = [&](int x) {
-                auto r = playheadBodyDirtyRect(x, top, bottom, compWidth, compHeight);
-                if (r.isEmpty()) return;
-                TimelinePaintMetrics::requestedPartialRepaints.fetch_add(1);
-                auto area = static_cast<uint64_t>(r.getWidth())
-                          * static_cast<uint64_t>(r.getHeight());
-                TimelinePaintMetrics::requestedDirtyAreaPixels.fetch_add(
-                    static_cast<int64_t>(area));
-                TimelinePaintMetrics::requestedDirtyAreaPixelsRing.push(area);
-            };
-            if (oldX == newX) {
-                recordOne(newX);
-            } else {
-                recordOne(oldX);
-                recordOne(newX);
-            }
-        }
-    } // anonymous namespace
-
     void ArrangementViewCore::setPlayheadPosition(double timeSeconds)
     {
         timeSeconds = juce::jmax(0.0, timeSeconds);
         if (std::abs(m_playheadTimeSeconds - timeSeconds) < 0.0001)
             return;
 
-        const double oldTime = m_playheadTimeSeconds;
-        const int oldX = timeToScreenX(oldTime);
+        const int oldX = timeToScreenX(m_playheadTimeSeconds);
         m_playheadTimeSeconds = timeSeconds;
         const int newX = timeToScreenX(timeSeconds);
-
-        // Delegate to ruler FIRST — ruler handles its own partial repaint
         m_ruler.setPlayheadPosition(timeSeconds);
+        if (oldX == newX)
+            return;
 
-        // Body playhead area: below the ruler
-        const int top = m_ruler.getBottom();
-        const int bottom = getHeight();
-        const int compW = getWidth();
-        const int compH = getHeight();
-
-        if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+        const auto body = getViewportVisibleBounds().getIntersection(
+            getLocalBounds().withTop(m_ruler.getBottom()));
+        const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+        for (const int x : { oldX, newX })
         {
-            recordPlayheadDirtyAreaMetrics(
-                oldX, newX, top, bottom, compW, compH);
+            // The 5 px glow needs one extra pixel of antialiasing margin.
+            const auto dirty = body.getIntersection({ x - 3, body.getY(), 7, body.getHeight() });
+            if (dirty.isEmpty())
+                continue;
+                repaint(dirty);
+            if (metricsActive)
+            {
+                const auto area = static_cast<uint64_t>(dirty.getWidth()) * dirty.getHeight();
+                TimelinePaintMetrics::requestedPartialRepaints.fetch_add(1);
+                TimelinePaintMetrics::requestedDirtyAreaPixels.fetch_add(static_cast<int64_t>(area));
+                TimelinePaintMetrics::requestedDirtyAreaPixelsRing.push(area);
+            }
         }
-
-        repaintPlayheadPositions(
-            *this, oldX, newX, top, bottom, compW, compH);
     }
 
     void ArrangementViewCore::addOrUpdateEngineClipModel(const ArrangementClipModel& model, const juce::String& engineClipId)
@@ -817,10 +737,15 @@ namespace ArrangementEditor
         for (int i = firstVisibleTrack; i < lastVisibleTrack; ++i)
         {
             const int y = getLaneTopForIndex(i);
-            g.setColour(fromU32(i % 2 == 0 ? Col::trackBg : Col::bg));
-            g.fillRect(0, y, getWidth(), trackH);
+            if (i % 2 == 0)
+            {
+                g.setColour(fromU32(Col::trackBg));
+                g.fillRect(visibleBounds.getIntersection(
+                    { visibleBounds.getX(), y, visibleBounds.getWidth(), trackH }));
+            }
             g.setColour(fromU32(Col::trackLine));
-            g.drawHorizontalLine(y + trackH - 1, 0.f, (float)getWidth());
+            g.drawHorizontalLine(y + trackH - 1, static_cast<float>(visibleBounds.getX()),
+                                 static_cast<float>(visibleBounds.getRight()));
         }
 
         // ── Beat/bar grid across lanes ──────────────────────────────────────
@@ -838,7 +763,7 @@ namespace ArrangementEditor
             // scrolled content, so it must NOT subtract the scroll offset.
             // Subtracting it shifted every bar line away from the clips and
             // the ruler as soon as the view scrolled.
-            auto timeToLaneX = [this](double t) { return (int) m_zoom.timeToX(t); };
+            auto timeToLaneX = [this](double t) { return timeToScreenX(t); };
             const int gridVisibleX0 = visibleBounds.getX();
             const int gridVisibleX1 = visibleBounds.getRight();
             const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
@@ -880,9 +805,11 @@ namespace ArrangementEditor
         }
 
         // ── Folder Track hierarchy — branch/continuity guides ───────────────
-        // Visual only: subtle grouping band + inherited parent accent on the
-        // lane's left edge. FolderBusCore/routing semantics are untouched.
-        if (m_engineTrackManager != nullptr)
+        // All folder guides lie along the start of the canvas.
+        constexpr int maxDepth = 16;
+        constexpr int indent = 6;
+        constexpr int guideRight = 2 + (maxDepth - 1) * indent + 1;
+        if (visibleBounds.getX() < guideRight && m_engineTrackManager != nullptr)
         {
             // Lane 0 is the MASTER lane when a master track exists; engine
             // tracks sit at lane = engineIndex + masterOffset (mirrors the
@@ -917,7 +844,7 @@ namespace ArrangementEditor
                 {
                     DAW::Track* cursor = track;
                     juce::String parentId = cursor->getParentTrackID();
-                    while (parentId.isNotEmpty() && depth < 16)
+                    while (parentId.isNotEmpty() && depth < maxDepth)
                     {
                         auto* parent = m_engineTrackManager->getTrack(parentId);
                         if (parent == nullptr) break;
@@ -943,14 +870,14 @@ namespace ArrangementEditor
                 {
                     // Child lane: darker grouping band + branch guide in the
                     // parent's accent, stepping right with nesting depth.
-                    const int bandW = juce::jmin(4 + (depth - 1) * 6, 22);
+                    const int bandW = juce::jmin(4 + (depth - 1) * indent, 22);
                     g.setColour(fromU32(Col::folderBand).withAlpha(0.60f));
                     g.fillRect(0, laneY, bandW, trackH);
 
                     for (int d = 0; d < depth; ++d)
                     {
                         g.setColour(parentAccent.withAlpha(d == depth - 1 ? 0.50f : 0.28f));
-                        g.fillRect(2 + d * 6, laneY, 1, trackH);
+                        g.fillRect(2 + d * indent, laneY, 1, trackH);
                     }
                 }
             }
@@ -1237,19 +1164,21 @@ namespace ArrangementEditor
             // One finger pans the timeline — anchored, with a 6 px slop so a
             // small nudge does not register, and the release velocity tracked
             // for the iOS momentum.
-            // Low-pass the touch position before using it: digitizers report
-            // ±1 px of noise on a nearly still finger, which is what made slow
-            // pans shake. The filter trades ~1 frame of lag for stability.
-            const auto localRaw = firstTouch; // screen-space; never shifts as the viewport pans
-            if (! m_smoothedTouchValid)
+            // Use the same continuous filter on both axes to prevent a
+            // steady drag alternating between a stationary frame and a jump.
+            const auto localRaw = firstTouch;
+            if (!m_smoothedTouchValid)
             {
-                m_smoothedTouchPos   = localRaw;
+                m_smoothedTouchPos = localRaw;
                 m_smoothedTouchValid = true;
             }
             else
             {
-                const float retained = (float)std::pow(0.6, frames);
-                m_smoothedTouchPos = m_smoothedTouchPos * retained + localRaw * (1.0f - retained);
+                const auto retained = static_cast<float>(std::pow(0.6, frames));
+                m_smoothedTouchPos.x = TouchNavigationMath::smoothTouchPan(
+                    m_smoothedTouchPos.x, localRaw.x, retained);
+                m_smoothedTouchPos.y = TouchNavigationMath::smoothTouchPan(
+                    m_smoothedTouchPos.y, localRaw.y, retained);
             }
             const auto posScreen = m_smoothedTouchPos.toInt();
             const auto local = getLocalPoint(nullptr, posScreen).toFloat();
@@ -1346,8 +1275,11 @@ namespace ArrangementEditor
             const int nextY = TouchNavigationMath::panPosition(m_gestureStartViewY,
                 pos.y - m_touchPanDownScreenPos.y,
                 juce::jmax(0, getHeight() - viewport->getViewHeight()));
-            if (nextX != beforeX || nextY != beforeY)
+            if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
+            {
+
                 viewport->setViewPosition(nextX, nextY);
+            }
 
             const auto delta = pos - m_lastTouchPanPos;
             const double retention = std::pow(0.7, frames);
@@ -1687,165 +1619,210 @@ namespace ArrangementEditor
         return snap != nullptr && !snap->empty();
     }
 
+    namespace
+    {
+        constexpr double masterPreviewHz = 25.0;
+        constexpr size_t maxMasterPreviewBins = 45000; // 30 minutes
+
+        double previewBinX(int64_t bin, double pixelsPerSecond) noexcept
+        {
+            return bin / masterPreviewHz * pixelsPerSecond;
+        }
+    }
+
     void ArrangementViewCore::recordMasterOutputPreview(
         double seconds, float leftPeak, float rightPeak, bool playing)
     {
+        TimelinePaintMetrics::ScopedTimer updateTimer(
+            TimelinePaintMetrics::masterPreviewUpdateDurationNs);
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewUpdateCalls);
         if (!playing || !std::isfinite(seconds) || seconds < 0.0)
         {
             m_masterPreviewWasPlaying = false;
             return;
         }
-        if (!m_masterPreviewWasPlaying)
-        {
-            // Each playback pass re-evaluates clips: a gain/limiter adjustment
-            // can eliminate previously observed clipping. No stale red marks.
+
+        const auto bin = static_cast<int64_t>(std::floor(seconds * masterPreviewHz));
+        const bool resetPreview = m_masterPreviewBins.empty() || !m_masterPreviewWasPlaying
+            || bin < m_masterPreviewBins.back().timeBin
+            || bin - m_masterPreviewBins.back().timeBin > 2500;
+        if (resetPreview)
             m_masterPreviewBins.clear();
-            // Keep old red clips until the playhead REVISITS that same bin.
-            // A safe sample at that position erases just that marker.
-        }
         m_masterPreviewWasPlaying = true;
-        constexpr double kPreviewHz = 25.0;
-        constexpr size_t kMaxBins = 45000; // 30 minutes, bounded on UI thread
-        const int64_t bin = (int64_t)std::floor(seconds * kPreviewHz);
-        if (!m_masterPreviewBins.empty())
-        {
-            const auto previous = m_masterPreviewBins.back().timeBin;
-            // Seek/rewind is a new listen pass. Never display old output
-            // values at a location that now belongs to another mix state.
-            if (bin < previous || bin - previous > 2500)
-            {
-                m_masterPreviewBins.clear();
-                // Seeking does not invalidate historical observed clipping.
-                // Replaying the same time bin safely clears the marker.
-            }
-        }
+
         const float l = std::isfinite(leftPeak) ? juce::jlimit(0.0f, 8.0f, leftPeak) : 0.0f;
         const float r = std::isfinite(rightPeak) ? juce::jlimit(0.0f, 8.0f, rightPeak) : 0.0f;
+        bool binChanged = true;
+        std::optional<int64_t> expiredBin;
         if (!m_masterPreviewBins.empty() && m_masterPreviewBins.back().timeBin == bin)
         {
-            m_masterPreviewBins.back().left = juce::jmax(m_masterPreviewBins.back().left, l);
-            m_masterPreviewBins.back().right = juce::jmax(m_masterPreviewBins.back().right, r);
+            auto& latest = m_masterPreviewBins.back();
+            binChanged = l > latest.left || r > latest.right;
+            latest.left = juce::jmax(latest.left, l);
+            latest.right = juce::jmax(latest.right, r);
         }
         else
         {
-            m_masterPreviewBins.push_back({bin, l, r});
-            while (m_masterPreviewBins.size() > kMaxBins)
-                m_masterPreviewBins.pop_front();
-        }
-        // Actual track-output clipping is observed during playback, never
-        // inferred from the source file or a static visual gain estimate.
-        // Attribute it only when EXACTLY ONE clip owns that track at this time;
-        // overlapping clips make attribution ambiguous.
-        if (m_engineTrackManager != nullptr)
-        {
-            const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
-            for (int index = 0; index < m_engineTrackManager->getNumTracks(); ++index)
+            m_masterPreviewBins.push_back({ bin, l, r });
+            if (m_masterPreviewBins.size() > maxMasterPreviewBins)
             {
-                auto* track = m_engineTrackManager->getTrack(index);
-                if (track == nullptr || track->isMaster())
-                    continue;
-                const ArrangementClipModel* active = nullptr;
-                int owners = 0;
-                for (const auto& candidate : m_clipState.allClips())
-                {
-                    const double duration = candidate.length
-                        * juce::jmax(0.01, (double)candidate.timePitch.stretchRatio);
-                    if (candidate.trackIndex == index + masterOffset
-                        && !candidate.muted && candidate.startTime <= seconds
-                        && seconds < candidate.startTime + duration)
-                    {
-                        active = &candidate;
-                        if (++owners > 1)
-                            break;
-                    }
-                }
-                if (owners != 1 || active == nullptr)
-                    continue;
-                const auto key = active->id.toString();
-                const float peak = juce::jmax(track->getPeakLevelLeft(), track->getPeakLevelRight());
-                // >1.0f, not >=1.0f: a brickwall limiter exactly at
-                // digital full-scale is NOT evidence of overshoot.
-                if (std::isfinite(peak) && peak > 1.0f)
-                    m_playbackClippedClipBins[key].insert(bin);
-                else if (auto it = m_playbackClippedClipBins.find(key);
-                         it != m_playbackClippedClipBins.end())
-                    it->second.erase(bin);
-                // The tick is a tiny read-only timeline overlay, not a
-                // cached waveform rewrite. Invalidate just the playhead
-                // vicinity of the owning clip while sampling the meter.
-                if (auto* renderer = findClipRendererFor(active->id))
-                    repaint(timeToScreenX(seconds) - 3,
-                            renderer->getY() + 15, 7, 14);
+                expiredBin = m_masterPreviewBins.front().timeBin;
+                m_masterPreviewBins.pop_front();
             }
         }
-        // Only the MASTER lane is invalidated, not the entire arrangement.
-        const int y = getLaneTopForIndex(0);
-        repaint(m_viewportScrollX, y,
-                juce::jmax(1, getViewportVisibleBounds().getWidth()),
-                juce::jmax(16, (int)m_zoom.getTrackHeightPx()));
+
+        const auto visible = getViewportVisibleBounds().withTrimmedTop(arrangementContentTop());
+        auto damage = visible;
+        const auto pps = m_zoom.getPixelsPerSecond();
+        const int x = static_cast<int>(std::floor(previewBinX(bin, pps)));
+        const auto masterLane = damage.withY(getLaneTopForIndex(0))
+            .withHeight(m_zoom.getTrackHeightPx()).getIntersection(damage);
+        const auto repaintMaster = [this, visible](juce::Rectangle<int> dirty)
+        {
+            if (dirty.isEmpty())
+                return;
+            repaint(dirty);
+            dirty = dirty.getIntersection(visible);
+            if (dirty.isEmpty())
+                return;
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewRepaintCalls);
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewDirtyPixels,
+                static_cast<uint64_t>(dirty.getWidth()) * dirty.getHeight());
+        };
+
+        // A new pass removes the previous meter history. During a pass only
+        // the columns where a peak changed or expired need repainting.
+        if (resetPreview)
+            repaintMaster(masterLane);
+        else if (!masterLane.isEmpty())
+        {
+            if (binChanged)
+                repaintMaster(masterLane.getIntersection({ x - 1, masterLane.getY(),
+                                                           4, masterLane.getHeight() }));
+            if (expiredBin)
+            {
+                const int expiredX = static_cast<int>(std::floor(previewBinX(*expiredBin, pps)));
+                repaintMaster(masterLane.getIntersection({ expiredX - 1, masterLane.getY(),
+                                                           4, masterLane.getHeight() }));
+            }
+        }
+
+        if (m_engineTrackManager == nullptr)
+            return;
+
+        // Look for a clip only if the track clips or a previously observed
+        // marker in this bin may need clearing when it is heard again.
+        const bool binHasMarker = std::any_of(m_playbackClippedClipBins.begin(),
+            m_playbackClippedClipBins.end(), [bin](const auto& entry)
+            { return entry.second.find(bin) != entry.second.end(); });
+        const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+        for (int index = 0; index < m_engineTrackManager->getNumTracks(); ++index)
+        {
+            auto* track = m_engineTrackManager->getTrack(index);
+            if (track == nullptr || track->isMaster())
+                continue;
+
+            const float peak = juce::jmax(track->getPeakLevelLeft(), track->getPeakLevelRight());
+            const bool clipped = std::isfinite(peak) && peak > 1.0f;
+            if (!clipped && !binHasMarker)
+                continue;
+
+            const ArrangementClipModel* active = nullptr;
+            int owners = 0;
+            for (const auto& candidate : m_clipState.allClips())
+            {
+                if (candidate.trackIndex != index + masterOffset
+                    || candidate.muted || candidate.startTime > seconds)
+                    continue;
+                const double duration = candidate.length
+                    * juce::jmax(0.01, static_cast<double>(candidate.timePitch.stretchRatio));
+                if (seconds < candidate.startTime + duration)
+                {
+                    active = &candidate;
+                    if (++owners > 1)
+                        break;
+                }
+            }
+
+            if (owners != 1 || active == nullptr)
+                continue;
+            bool markerChanged = false;
+            if (clipped)
+            {
+                markerChanged = m_playbackClippedClipBins[active->id].insert(bin).second;
+            }
+            else if (auto it = m_playbackClippedClipBins.find(active->id);
+                     it != m_playbackClippedClipBins.end())
+            {
+                markerChanged = it->second.erase(bin) > 0;
+                if (it->second.empty())
+                    m_playbackClippedClipBins.erase(it);
+            }
+            if (markerChanged)
+                if (auto* renderer = findClipRendererFor(active->id))
+                {
+                    const int y = juce::jmax(renderer->getY() + 17, visible.getY());
+                    repaint(damage.getIntersection({ x - 1, y, 4, 7 }));
+                }
+        }
     }
 
     void ArrangementViewCore::drawReadOnlyMasterPreview(juce::Graphics& g)
     {
+        TimelinePaintMetrics::ScopedTimer paintTimer(
+            TimelinePaintMetrics::masterPreviewPaintDurationNs);
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewPaintCalls);
         if (m_masterPreviewBins.empty() || m_engineTrackManager == nullptr
             || !m_engineTrackManager->hasMasterTrack())
             return;
 
-        const float laneH = m_zoom.getTrackHeightPx();
-        const float laneY = (float)getLaneTopForIndex(0);
-        const float top = laneY + 11.0f;
-        const float bottom = laneY + laneH - 11.0f;
-        if (bottom <= top)
+        const int laneHeight = m_zoom.getTrackHeightPx();
+        const int laneY = getLaneTopForIndex(0);
+        const auto visible = getViewportVisibleBounds().withTrimmedTop(arrangementContentTop());
+        const auto dirty = visible.withY(laneY).withHeight(laneHeight)
+            .getIntersection(visible).getIntersection(g.getClipBounds());
+        if (dirty.isEmpty() || laneHeight <= 22)
             return;
 
-        const float centre = (top + bottom) * 0.5f;
-        const float half = (bottom - top) * 0.5f;
-        const int visibleLeft = m_viewportScrollX;
-        const int visibleRight = visibleLeft
-            + juce::jmax(1, getViewportVisibleBounds().getWidth());
+        juce::Graphics::ScopedSaveState clipToLane(g);
+        if (!g.reduceClipRegion(dirty))
+            return;
+
+        const float centre = laneY + laneHeight * 0.5f;
+        const float half = laneHeight * 0.5f - 11.0f;
+        const float top = centre - half;
         const double pps = m_zoom.getPixelsPerSecond();
+        const auto teal = juce::Colour(0xFF5DDAD0);
+        const auto waveform = teal.withAlpha(0.76f);
+        const auto clipping = juce::Colour(0xFFFF3B30);
+        g.setColour(teal.withAlpha(0.28f));
+        g.drawHorizontalLine(static_cast<int>(centre),
+                             static_cast<float>(dirty.getX()), static_cast<float>(dirty.getRight()));
+        g.setColour(waveform);
 
-        g.saveState();
-        // The master is part of the scrollable canvas, but this is painted
-        // above child components. Clip to the visible timeline BELOW both
-        // pinned toolbars so playback peaks never draw across their controls.
-        const int protectedTop = m_viewportScrollY + 80;
-        const int visibleTop = juce::jmax((int)laneY, protectedTop);
-        const int visibleBottom = (int)(laneY + laneH);
-        if (visibleBottom <= visibleTop)
-        {
-            g.restoreState();
-            return;
-        }
-        g.reduceClipRegion(juce::Rectangle<int>(
-            visibleLeft, visibleTop, visibleRight - visibleLeft,
-            visibleBottom - visibleTop));
-        g.setColour(juce::Colour(0xFF5DDAD0).withAlpha(0.28f));
-        g.drawHorizontalLine((int)centre, (float)visibleLeft, (float)visibleRight);
-
-        const int64_t firstBin = (int64_t)std::floor(visibleLeft / pps * 25.0) - 2;
+        const auto firstBin = static_cast<int64_t>(std::floor((dirty.getX() - 2) / pps * masterPreviewHz));
         const auto first = std::lower_bound(m_masterPreviewBins.begin(),
             m_masterPreviewBins.end(), firstBin,
             [](const MasterPreviewBin& item, int64_t query)
             { return item.timeBin < query; });
         for (auto it = first; it != m_masterPreviewBins.end(); ++it)
         {
-            const float x = (float)(it->timeBin / 25.0 * pps);
-            if (x > visibleRight + 2)
+            const float x = static_cast<float>(previewBinX(it->timeBin, pps));
+            if (x >= dirty.getRight())
                 break;
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewBinsDrawn);
             const float left = juce::jmin(1.0f, it->left);
             const float right = juce::jmin(1.0f, it->right);
-            g.setColour(juce::Colour(0xFF5DDAD0).withAlpha(0.76f));
             g.fillRect(x, centre - left * half, 1.5f, left * half);
             g.fillRect(x, centre, 1.5f, right * half);
 
             if (it->left > 1.0f || it->right > 1.0f)
             {
-                g.setColour(juce::Colour(0xFFFF3B30));
-                g.fillRect(x, top, 2.0f, juce::jmax(3.0f, laneH * 0.125f));
+                g.setColour(clipping);
+                g.fillRect(x, top, 2.0f, juce::jmax(3.0f, laneHeight * 0.125f));
+                g.setColour(waveform);
             }
         }
-        g.restoreState();
     }
 
     void ArrangementViewCore::paintOverChildren(juce::Graphics& g)
@@ -1859,36 +1836,37 @@ namespace ArrangementEditor
         // plugin chain or audio mutation. Draw the observed stereo peak history.
         drawReadOnlyMasterPreview(g);
 
-        // n-Track-inspired playback history, sourced from REAL channel meters.
-        // No red tick before playback; every new playback pass clears history.
-        // Display only the single clip owning a clipping track, never all the
-        // source-file peaks or other clips sharing an overlapping track.
+        // Playback clipping history comes from channel meters when a single
+        // clip owns the playing track. Draw only ticks in the dirty area.
         if (!m_playbackClippedClipBins.empty())
         {
-            const auto visible = getViewportVisibleBounds();
-            const auto pps = m_zoom.getPixelsPerSecond();
-            const auto leftBin = (int64_t)std::floor(m_viewportScrollX / pps * 25.0);
-            const auto rightBin = (int64_t)std::ceil(
-                (m_viewportScrollX + visible.getWidth()) / pps * 25.0);
-            const int protectedTop = m_viewportScrollY + 80;
-            g.setColour(juce::Colour(0xFFFF3B30));
-            for (const auto& entry : m_playbackClippedClipBins)
+            const auto visible = getViewportVisibleBounds().withTrimmedTop(arrangementContentTop());
+            const auto dirty = visible.getIntersection(g.getClipBounds());
+            if (!dirty.isEmpty())
             {
-                const juce::Uuid id(entry.first);
-                const auto* clip = m_clipState.findClip(id);
-                auto* renderer = findClipRendererFor(id);
-                if (clip == nullptr || renderer == nullptr)
-                    continue;
-                const auto bounds = renderer->getBounds();
-                const int top = juce::jmax(bounds.getY() + 17, protectedTop);
-                if (top >= bounds.getBottom())
-                    continue;
-                for (auto it = entry.second.lower_bound(leftBin);
-                     it != entry.second.end() && *it <= rightBin; ++it)
+                const auto pps = m_zoom.getPixelsPerSecond();
+                const auto firstBin = static_cast<int64_t>(
+                    std::floor((dirty.getX() - 2) / pps * masterPreviewHz));
+                const auto lastBin = static_cast<int64_t>(
+                    std::ceil(dirty.getRight() / pps * masterPreviewHz));
+                g.setColour(juce::Colour(0xFFFF3B30));
+                for (const auto& entry : m_playbackClippedClipBins)
                 {
-                    const float x = (float)((double)(*it) / 25.0 * pps);
-                    if (x >= bounds.getX() && x < bounds.getRight())
-                        g.fillRect(x, (float)top, 2.0f, 6.0f);
+                    const auto* renderer = findClipRendererFor(entry.first);
+                    if (renderer == nullptr)
+                        continue;
+                    const auto bounds = renderer->getBounds();
+                    const int top = juce::jmax(bounds.getY() + 17, visible.getY());
+                    if (top >= bounds.getBottom() || top >= dirty.getBottom()
+                        || top + 6 <= dirty.getY() || !bounds.intersects(dirty.expanded(2, 0)))
+                        continue;
+                    for (auto it = entry.second.lower_bound(firstBin);
+                         it != entry.second.end() && *it <= lastBin; ++it)
+                    {
+                        const float x = static_cast<float>(previewBinX(*it, pps));
+                        if (x >= bounds.getX() && x < bounds.getRight())
+                            g.fillRect(x, static_cast<float>(top), 2.0f, 6.0f);
+                    }
                 }
             }
         }
@@ -1899,6 +1877,11 @@ namespace ArrangementEditor
         if (m_drag.active)
             drawGhost(g);
 
+        paintTimelineForeground(g);
+    }
+
+    void ArrangementViewCore::paintTimelineForeground(juce::Graphics& g)
+    {
         const int x = timeToScreenX(m_playheadTimeSeconds);
         if (x >= 0 && x <= getWidth())
         {
@@ -2056,9 +2039,7 @@ namespace ArrangementEditor
         if (!m_pendingZoom || m_applyingZoom)
             return;
 
-       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         TimelinePaintMetrics::ScopedTimer zoomTimer(TimelinePaintMetrics::viewportZoomDurationNs);
-       #endif
         auto request = *m_pendingZoom;
         m_pendingZoom.reset();
         if (m_drag.active || m_drag.pending || m_rubberBand.isVisible())
@@ -2101,12 +2082,10 @@ namespace ArrangementEditor
             TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementZoomUpdates);
             m_viewportScrollX = actual.x;
             m_viewportScrollY = actual.y;
-            updatePinnedViewportControls();
+            updatePinnedViewportControls(heightChanged || actual.y != start.y);
             m_ruler.setScrollOffsetX(actual.x);
-            m_ruler.repaint();
-            projectClips();
-            updateClipRendererVisibility();
-            updateAutomationLayout();
+            updateClipRendererVisibility(heightChanged ? ClipBoundsUpdate::all : ClipBoundsUpdate::time);
+            updateAutomationLayout(heightChanged);
             repaint(getViewportVisibleBounds());
         }
         else
@@ -2116,7 +2095,7 @@ namespace ArrangementEditor
             onZoomPresented();
     }
 
-    void ArrangementViewCore::updatePinnedViewportControls()
+    void ArrangementViewCore::updatePinnedViewportControls(bool restack)
     {
         const auto viewportWidth = [this]() -> int
         {
@@ -2154,8 +2133,11 @@ namespace ArrangementEditor
         // and Lock), preserving the right-hand arranger interaction area.
         m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 152,
                                         m_viewportScrollY + 6, 80, 36);
-        m_headerButtonShield->toFront(false);
-        m_pianoRollBtn.toFront(false);
+        if (restack)
+        {
+            m_headerButtonShield->toFront(false);
+            m_pianoRollBtn.toFront(false);
+        }
 
         // Keep Piano Roll code intact but hide/disable its actual widget.
         if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
@@ -2179,6 +2161,7 @@ namespace ArrangementEditor
     {
         if (m_applyingZoom)
             return;
+        auto* viewport = findParentComponentOfClass<juce::Viewport>();
         m_zoom.observeScroll({ (double)scrollX, (double)scrollY });
         scrollX = juce::jmax(0, scrollX);
         scrollY = juce::jmax(0, scrollY);
@@ -2186,9 +2169,12 @@ namespace ArrangementEditor
         if (m_viewportScrollX == scrollX && m_viewportScrollY == scrollY)
             return;
 
+        const bool verticalMoved = m_viewportScrollY != scrollY;
+        const bool horizontalMoved = m_viewportScrollX != scrollX;
         m_viewportScrollX = scrollX;
         m_viewportScrollY = scrollY;
-        m_ruler.setScrollOffsetX(scrollX);
+        m_ruler.setScrollOffsetX(scrollX, horizontalMoved);
+
 
         TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollEvents);
         const juce::ScopedValueSetter<bool> scrollGuard(m_inViewportScroll, true);
@@ -2197,13 +2183,14 @@ namespace ArrangementEditor
         // existing clip components are eligible to paint.  It is not a
         // structural resize: clip models, bounds, automation layout, and
         // renderer ownership remain unchanged.
-        updatePinnedViewportControls();
+        updatePinnedViewportControls(verticalMoved);
         updateClipRendererVisibility();
 
-        // Repaint only the viewport-visible content region.  JUCE coalesces
-        // this with the Viewport's exposed-area invalidation, while keeping
-        // the culling/LOD decisions above authoritative.  Unchanged clip
-        // renderers are not individually invalidated by a pure translation.
+        // Moving the viewed JUCE component already invalidates the viewport.
+        // A detached arranger can still receive an explicit offset in tests.
+        if (viewport != nullptr)
+            if (viewport->getViewPosition() == juce::Point<int>(scrollX, scrollY))
+                return;
         const auto visibleRepaint = getViewportVisibleBounds().getIntersection(getLocalBounds());
         if (!visibleRepaint.isEmpty())
         {
@@ -2339,8 +2326,11 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::setTempoBpm(double bpm)
     {
-        m_tempoBpm = juce::jmax(1.0, bpm);
-        m_ruler.setTempo(m_tempoBpm);
+        bpm = juce::jmax(1.0, bpm);
+        if (m_tempoBpm == bpm)
+            return;
+        m_tempoBpm = bpm;
+        m_ruler.setTempo(bpm);
     }
 
     void ArrangementViewCore::rebuildClipRenderers()
@@ -2428,15 +2418,14 @@ namespace ArrangementEditor
         int trackH = (int)m_zoom.getTrackHeightPx();
 
         int x = timeToScreenX(clip.startTime);
-        int w = (int)(clip.visualLength() * m_zoom.getPixelsPerSecond());
-        w = juce::jmax(4, w);
+        const int w = juce::jmax(4, timeToScreenX(clip.visualLength()));
         int y = getLaneTopForIndex(clip.trackIndex);
         int h = trackH - 2;
 
         // Collapsed folder: keep the renderer alive but park it offscreen so
         // expanding the folder restores every clip instantly. laneIndex 0 is
         // the MASTER lane; regular tracks sit at laneIndex = index + offset.
-        if (m_engineTrackManager != nullptr)
+        if (m_engineTrackManager != nullptr && !m_collapsedFolderIds.empty())
         {
             const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
             if (clip.trackIndex >= masterOffset)
@@ -2449,25 +2438,6 @@ namespace ArrangementEditor
         }
 
         return { x, y, w, h };
-    }
-
-    void ArrangementViewCore::projectClips()
-    {
-        const auto viewport = getViewportVisibleBounds();
-        const int trackHeight = m_zoom.getTrackHeightPx();
-        for (auto& renderer : m_clipRenderers)
-        {
-            const auto* clip = renderer->getClip();
-            if (!clip)
-                continue;
-            const auto bounds = projectClipBounds(*clip);
-            // Move hidden renderers without invalidating their previous or new area.
-            if (!ArrangementClipLodPolicy::intersectsViewport(bounds, viewport, trackHeight)
-                && !renderer->isEditGestureActive())
-                renderer->setVisible(false);
-            if (renderer->getBounds() != bounds)
-                renderer->setBounds(bounds);
-        }
     }
 
     void ArrangementViewCore::upsertClipRenderer(const juce::Uuid& clipId)
@@ -2495,7 +2465,10 @@ namespace ArrangementEditor
             renderer->updateClipData(*clip);
             renderer->setCachedAudioHandle(cachedAudio, !hasEngineAudioOwner);
             if (renderer->getBounds() != targetBounds)
+            {
+                m_clipVisibilityGuard = {};
                 renderer->setBounds(targetBounds);
+            }
             renderer->setSelected(m_selection.isSelected(clip->id));
             renderer->setSoloActive(!m_clipAuditionSoloId.isNull()
                 && clip->id == m_clipAuditionSoloId);
@@ -3005,6 +2978,7 @@ namespace ArrangementEditor
         };
 
         auto* addedRenderer = renderer.get();
+        m_clipVisibilityGuard = {};
         addAndMakeVisible(*addedRenderer);
         addedRenderer->setVisible(shouldShowClipRenderer(*addedRenderer));
         if (addedRenderer->isVisible() && addedRenderer->shouldRenderWaveform()
@@ -3702,14 +3676,7 @@ namespace ArrangementEditor
         if (zoomWheel(event, wheel))
             return;
         if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
-        {
-            const auto origin = viewport->getViewPosition();
-            const int dx = juce::roundToInt(-wheel.deltaX * 120.0f);
-            const int dy = juce::roundToInt(-wheel.deltaY * 120.0f);
-            viewport->setViewPosition(
-                juce::jlimit(0, juce::jmax(0, getWidth() - viewport->getViewWidth()), origin.x + dx),
-                juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()), origin.y + dy));
-        }
+            viewport->mouseWheelMove(event.getEventRelativeTo(viewport), wheel);
     }
 
     void ArrangementViewCore::mouseMagnify(const juce::MouseEvent& event, float scaleFactor)
@@ -4526,30 +4493,59 @@ namespace ArrangementEditor
         if (m_drag.active || renderer.isEditGestureActive())
             return true;
 
-        const int trackH = juce::jmax(1, (int)m_zoom.getTrackHeightPx());
-        const int overscanY = juce::jmax(ArrangementClipLodPolicy::kViewportOverscanPx, trackH);
-        const auto renderRegion = getViewportVisibleBounds().expanded(
-            ArrangementClipLodPolicy::kViewportOverscanPx, overscanY);
-        return renderRegion.intersects(renderer.getBounds());
+        const auto bounds = renderer.getBounds();
+        // A model-only edit must not hide a previously prepared clip inside
+        // the guard. Inserts and bounds changes invalidate the guard first.
+        return (renderer.isVisible() && m_clipVisibilityGuard.intersects(bounds))
+            || ArrangementClipLodPolicy::intersectsViewport(bounds,
+                getViewportVisibleBounds(), m_zoom.getTrackHeightPx());
     }
 
-    void ArrangementViewCore::updateClipRendererVisibility()
+    void ArrangementViewCore::updateClipRendererVisibility(ClipBoundsUpdate update)
     {
+        const auto viewport = getViewportVisibleBounds();
+        if (update == ClipBoundsUpdate::none && m_inViewportScroll
+            && !m_drag.active && m_clipVisibilityGuard.contains(viewport))
+            return;
+
+        const int trackHeight = m_zoom.getTrackHeightPx();
+        const auto region = ArrangementClipLodPolicy::renderRegion(viewport, trackHeight);
+        auto guard = ArrangementClipLodPolicy::visibilityGuard(viewport, getWidth(), trackHeight);
         for (auto& renderer : m_clipRenderers)
         {
             if (renderer == nullptr)
                 continue;
 
+            const auto* clip = renderer->getClip();
+            const auto oldBounds = renderer->getBounds();
+            auto nextBounds = oldBounds;
+            if (clip != nullptr)
+            {
+                if (update == ClipBoundsUpdate::time)
+                    nextBounds = oldBounds.withX(timeToScreenX(clip->startTime))
+                        .withWidth(juce::jmax(4, timeToScreenX(clip->visualLength())));
+                else if (update == ClipBoundsUpdate::all)
+                    nextBounds = projectClipBounds(*clip);
+            }
             const bool wasVisible = renderer->isVisible();
-            const bool shouldBeVisible = shouldShowClipRenderer(*renderer);
+            const bool shouldBeVisible = m_drag.active || renderer->isEditGestureActive()
+                                          || region.intersects(nextBounds);
+            if (!shouldBeVisible)
+                ArrangementClipLodPolicy::excludeHiddenClip(guard, viewport, nextBounds, trackHeight);
             if (m_inViewportScroll)
             {
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollClipIterations);
                 if (wasVisible != shouldBeVisible)
                     TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollVisibilityChanges);
             }
-            if (wasVisible != shouldBeVisible)
-                renderer->setVisible(shouldBeVisible);
+            // Project hidden clips before showing them so the old bounds
+            // never dirty another area during a zoom transaction.
+            if (wasVisible && !shouldBeVisible)
+                renderer->setVisible(false);
+            if (nextBounds != oldBounds)
+                renderer->setBounds(nextBounds);
+            if (!wasVisible && shouldBeVisible)
+                renderer->setVisible(true);
 
             if (TimelinePaintMetrics::active.load(std::memory_order_relaxed)
                 && !shouldBeVisible)
@@ -4560,8 +4556,7 @@ namespace ArrangementEditor
             // Tiny or non-audio clips therefore never start a cache worker just
             // because their renderer exists.
             if (shouldBeVisible && renderer->shouldRenderWaveform()
-                && renderer->getClip() != nullptr
-                && !renderer->getClip()->sourcePath.empty()
+                && clip != nullptr && !clip->sourcePath.empty()
                 && renderer->needsWaveformUpdate())
             {
                 if (m_inViewportScroll)
@@ -4569,6 +4564,9 @@ namespace ArrangementEditor
                 renderer->refresh();
             }
         }
+        // An active drag can force offscreen clips visible. Re-evaluate
+        // once after the drag so that temporary visibility is retired.
+        m_clipVisibilityGuard = m_drag.active ? juce::Rectangle<int>() : guard;
     }
 
     void ArrangementViewCore::updateRubberBandSelection(const juce::Rectangle<int>& bounds)
@@ -4761,7 +4759,7 @@ namespace ArrangementEditor
 
     int ArrangementViewCore::timeToScreenX(double time) const
     {
-        return (int)m_zoom.timeToX(time);
+        return m_zoom.timeToPixel(time);
     }
 
     int ArrangementViewCore::arrangementContentTop() const
@@ -6803,7 +6801,7 @@ namespace ArrangementEditor
                 const int trackH = (int)m_zoom.getTrackHeightPx();
                 const int x = timeToScreenX(sourceClip.startTime);
                 const int y = arrangementContentTop() + sourceClip.trackIndex * trackH;
-                const int w = juce::jmax(4, (int)(sourceClip.visualLength() * m_zoom.getPixelsPerSecond()));
+                const int w = juce::jmax(4, timeToScreenX(sourceClip.visualLength()));
                 bounds = { x, y, w, trackH - 2 };
             }
 
@@ -8305,11 +8303,12 @@ void ArrangementViewCore::clearAutomationLanes(const DAW::TrackID& trackId)
     }
 }
 
-void ArrangementViewCore::updateAutomationLayout()
+void ArrangementViewCore::updateAutomationLayout(bool restack)
 {
-    // Send all clip renderers to the back first
-    for (auto& r : m_clipRenderers)
-        r->toBack();
+    // Time zoom changes dimensions without changing any child ownership.
+    if (restack)
+        for (auto& renderer : m_clipRenderers)
+            renderer->toBack();
 
     for (auto& [trackId, container] : m_automationContainers)
     {
@@ -8341,7 +8340,8 @@ void ArrangementViewCore::updateAutomationLayout()
 
         container->setVisible(true);
         container->setBounds(laneBounds.getX(), y, laneBounds.getWidth(), height);
-        container->toFront(false);
+        if (restack)
+            container->toFront(false);
         container->setSamplesPerPixel(juce::jmax(1.0, m_engineSampleRate / juce::jmax(1.0, m_zoom.getPixelsPerSecond())));
         container->setZoomLevel(m_zoom.getPixelsPerSecond());
         container->setSampleRate(m_engineSampleRate);
@@ -8354,7 +8354,8 @@ void ArrangementViewCore::updateAutomationLayout()
 
     // Re-front the pinned toolbar/ruler AFTER every container toFront so the
     // Quick New Track button always wins hit-testing in the pinned strip.
-    ensureToolbarZOrder();
+    if (restack)
+        ensureToolbarZOrder();
 }
 
 void ArrangementViewCore::changeListenerCallback(juce::ChangeBroadcaster* source)
@@ -8403,7 +8404,8 @@ int ArrangementViewCore::getLaneIndexForY(int y) const noexcept
 void ArrangementViewCore::setInlinePlaylistExpansion(
     const DAW::TrackID& trackId, int extraPixels)
 {
-    const int clamped = juce::jlimit(0, 128 * 180, extraPixels);
+    const int clamped = juce::jlimit(0, DAW::TrackPlaylistInlineLayoutCore::maxTakeRows
+            * DAW::TrackPlaylistInlineLayoutCore::maxTakeHeight, extraPixels);
     if (m_inlinePlaylistTrackId == trackId && m_inlinePlaylistExtraPixels == clamped)
         return;
     m_inlinePlaylistTrackId = trackId;
