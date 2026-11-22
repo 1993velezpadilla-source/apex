@@ -308,6 +308,29 @@ static_assert(compactShortcutsDisappearBelowThreshold());
 // 268+ boundary may expose 44-unit transport targets.
 static_assert(compactAtThreshold.transport[0].height == 0
               && compactBelowThreshold.transport[0].height == 0);
+// Split-screen width transitions must never expose partial six-action rows.
+// A resize from 268 to 267 and back must restore all six touch targets,
+// including at the minimum 44-unit deck height (IME/safe-area collapse).
+constexpr bool compactActionWidthRecovery()
+{
+    for (const int h : {44, 93, 94, 112, 180})
+    {
+        const auto before = DAW::mobile::compactPhoneTransportLayout(267, h);
+        const auto restored = DAW::mobile::compactPhoneTransportLayout(268, h);
+        if (!validCompact(267, h) || !validCompact(268, h)) return false;
+        for (int i = 0; i < 6; ++i)
+        {
+            if (before.transport[i].width != 0 || before.transport[i].height != 0)
+                return false;
+            if (restored.transport[i].width < 44 || restored.transport[i].height < 44)
+                return false;
+        }
+        if (!exclusiveHitEdges(restored)) return false;
+    }
+    return true;
+}
+static_assert(compactActionWidthRecovery());
+
 // Landscape rotation must preserve the six transport hit targets and
 // phone-only floating Mixer / Sends shortcuts at accessible dimensions.
 constexpr auto rotated = DAW::mobile::compactPhoneTransportLayout(852, 180);
