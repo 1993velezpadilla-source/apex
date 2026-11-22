@@ -1014,6 +1014,29 @@ int main()
     // The 1,058-case recovery sweep runs at runtime to avoid GCC's constexpr
     // evaluation budget; retain the same checks in optimized/NDEBUG builds.
     assert(compactWideInsetRecoverySweep());
+    // Every intermediate split-screen/IME size around the 268-unit
+    // six-action activation boundary must be safe, not just sampled sizes.
+    // This is a portable geometry test; native JUCE dispatch is separate.
+    for (int w = 260; w <= 275; ++w)
+        for (int h = 44; h <= 110; ++h)
+        {
+            const auto deck = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            for (const auto action : deck.transport)
+                if (w < 268)
+                    assert(action.width == 0 && action.height == 0);
+                else
+                    assert(inside(action, w, h) && action.width >= 44
+                           && action.height >= 44);
+            for (const auto shortcut : {deck.fx, deck.browser,
+                                        deck.mixer, deck.sends})
+                if (h < 94)
+                    assert(shortcut.width == 0 && shortcut.height == 0);
+                else
+                    assert(inside(shortcut, w, h) && shortcut.width >= 44
+                           && shortcut.height >= 44);
+        }
     // Deep keyboard-inset recovery: when only one 44-unit row fits,
     // Transport must stay tappable and all optional top-row targets hidden.
     // Runtime sweep avoids GCC constexpr evaluation-budget regressions.
