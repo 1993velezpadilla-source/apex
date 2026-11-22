@@ -288,6 +288,24 @@ public:
             && moves.minX == firstX && moves.maxX == lastX
             && std::abs(delta) < scroll.area.getWidth()
             && std::abs(exactDelta - static_cast<double>(delta)) < 0.0001;
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (retainTranslatedTimeline && measuring && scrolled && !moves.regions.isEmpty())
+        {
+            if (scrollProbeEpoch != measurementEpoch)
+            {
+                scrollProbeEpoch = measurementEpoch;
+                scrollProbeSamples = 0;
+            }
+            if (scrollProbeSamples++ < 6)
+                __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                    "TRANSLATED_TIMELINE eligible=%d unobstructed=%d/%d reset=%d "
+                    "dx=%.5f origin=%d/%d range=%d/%d body=%d,%d,%d,%d",
+                    canTranslate, lastScroll.unobstructed, scroll.unobstructed, reset,
+                    exactDelta, lastScroll.contentOrigin.x, scroll.contentOrigin.x,
+                    moves.minX, moves.maxX, scroll.area.getX(), scroll.area.getY(),
+                    scroll.area.getWidth(), scroll.area.getHeight());
+        }
+       #endif
         if (canTranslate)
         {
             addExposedScrollDamage(redraw, moves, scroll, static_cast<int>(delta), scale);
@@ -669,6 +687,10 @@ private:
     int frameScrollOffset = 0;
     float frameScale = 0.0f;
     bool frameOpaque = false;
+   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    uint32_t scrollProbeEpoch = 0;
+    int scrollProbeSamples = 0;
+   #endif
 };
 
 class FrameTiles final : private Timer
@@ -800,31 +822,44 @@ public:
    #endif
 
 private:
-    static bool hasUnobstructedBody(const Component& root, const Component& content,
-                                    Rectangle<int> bodyInRoot)
+    static Rectangle<int> unobstructedTimelineBody(const Component& root, const Component& content,
+                                                    Rectangle<int> bodyInRoot)
     {
         if (!content.isOpaque() || !root.getLocalBounds().contains(bodyInRoot))
-            return false;
+            return {};
 
+        RectangleList<int> available(bodyInRoot);
         for (auto* child = &content; child != &root; )
         {
             const auto* parent = child->getParentComponent();
             if (parent == nullptr || child->isTransformed() || child->getAlpha() != 1.0f
                 || child->getCachedComponentImage() != nullptr
                 || !root.getLocalArea(child, child->getLocalBounds()).contains(bodyInRoot))
-                return false;
+                return {};
 
             for (int index = parent->getIndexOfChildComponent(child) + 1;
                  index < parent->getNumChildComponents(); ++index)
             {
                 const auto* sibling = parent->getChildComponent(index);
-                if (sibling->isVisible()
-                    && root.getLocalArea(sibling, sibling->getLocalBounds()).intersects(bodyInRoot))
-                    return false;
+                if (sibling->isVisible())
+                {
+                    // A floating control may cover a few pixels of the
+                    // timeline. Keep its footprint in the stationary raster.
+                    const auto bounds = root.getLocalArea(sibling, sibling->getLocalBounds());
+                    available.subtract(bounds.expanded(1));
+                }
             }
             child = parent;
         }
-        return true;
+
+        // The existing bitmap ring presents one rectangular scroll layer.
+        // Pick its largest unobstructed rectangle and paint the rest normally.
+        Rectangle<int> best;
+        for (const auto& candidate : available)
+            if (static_cast<int64_t>(candidate.getWidth()) * candidate.getHeight()
+                > static_cast<int64_t>(best.getWidth()) * best.getHeight())
+                best = candidate;
+        return best;
     }
 
     HorizontalTileScroll timelineScroll(const Component& root, Rectangle<int> surface, float scale) const
@@ -840,20 +875,20 @@ private:
         const auto body = viewport->getLocalBounds().withWidth(viewport->getViewWidth())
             .withHeight(viewport->getViewHeight()).withTrimmedTop(timelineHeaderHeight);
         const auto bodyInRoot = root.getLocalArea(viewport, body);
-        const auto area = (bodyInRoot.toFloat() * scale)
+        const auto contentOrigin = root.getLocalPoint(content, Point<int>{});
+        const auto origin = snapDeviceX(contentOrigin.x, scale);
+        const auto reusable = retainTranslatedTimeline && std::abs(origin) < (1 << 21)
+            ? unobstructedTimelineBody(root, *content, bodyInRoot) : Rectangle<int>{};
+        const auto area = ((reusable.isEmpty() ? bodyInRoot : reusable).toFloat() * scale)
             .getSmallestIntegerContainer().getIntersection(surface);
         if (area.isEmpty() || static_cast<int64_t>(area.getWidth()) * area.getHeight() > 4'000'000)
             return {};
 
         // Match the software blit's device-pixel origin. Rounding the scroll
         // distance alone introduces one-pixel mismatches at fractional DPI.
-        const auto contentOrigin = root.getLocalPoint(content, Point<int>{});
-        const auto origin = snapDeviceX(contentOrigin.x, scale);
         const int width = area.getWidth();
         const int offset = static_cast<int>(-origin % width);
-        return { area, offset < 0 ? offset + width : offset, contentOrigin, content,
-                 retainTranslatedTimeline && std::abs(origin) < (1 << 21)
-                     && hasUnobstructedBody(root, *content, bodyInRoot) };
+        return { area, offset < 0 ? offset + width : offset, contentOrigin, content, !reusable.isEmpty() };
     }
 
     void timerCallback() override

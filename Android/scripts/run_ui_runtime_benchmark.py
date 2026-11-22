@@ -267,6 +267,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         time.sleep(0.5)
     full_log = adb("logcat", "-d", "-v", "threadtime")
     (output / f"{name}-logcat.txt").write_text(full_log)
+    if retain_translated_timeline and scene == "empty" and repeat == 1:
+        for line in [x for x in full_log.splitlines() if "TRANSLATED_TIMELINE " in x][:12]:
+            print(f"[TRANSLATED-TIMELINE] {name} {line.split('TRANSLATED_TIMELINE ', 1)[1]}", flush=True)
     # 9.5 proved frame-time wait dominates CPU raster (~38ms off-CPU
     # versus ~9ms CPU). Make the native per-component profiler VISIBLE in
     # the Actions log; retaining it only in a zipped logcat left the
