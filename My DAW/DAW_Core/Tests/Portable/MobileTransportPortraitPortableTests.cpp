@@ -329,7 +329,7 @@ constexpr bool compactActionWidthRecovery()
     }
     return true;
 }
-static_assert(compactActionWidthRecovery());
+// Evaluated after exclusiveHitEdges is defined below.
 
 // Landscape rotation must preserve the six transport hit targets and
 // phone-only floating Mixer / Sends shortcuts at accessible dimensions.
@@ -495,7 +495,7 @@ constexpr bool exclusiveHitEdges(DAW::mobile::PortraitTransportLayout r)
     }
     return true;
 }
-static_assert(exclusiveHitEdges(portraitTransportLayout(320, 144)));
+static_assert(compactActionWidthRecovery());\nstatic_assert(exclusiveHitEdges(portraitTransportLayout(320, 144)));
 static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(320, 112)));
 static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(852, 180)));
 
