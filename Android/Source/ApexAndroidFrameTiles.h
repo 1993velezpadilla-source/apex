@@ -278,10 +278,14 @@ public:
         // using the complete raster and shadow comparison.
         const auto exactDelta = (static_cast<double>(scroll.contentOrigin.x)
                                   - lastScroll.contentOrigin.x) * scale;
+        const auto [firstX, lastX] = std::minmax(lastScroll.contentOrigin.x, scroll.contentOrigin.x);
         const bool canTranslate = !reset && !moves.regions.isEmpty()
             && scroll.unobstructed && lastScroll.unobstructed
             && scroll.content == lastScroll.content
             && scroll.contentOrigin.y == lastScroll.contentOrigin.y
+            // Pixels temporarily offscreen may have changed without a peer
+            // repaint. Keep the full raster after an overshoot or round-trip.
+            && moves.minX == firstX && moves.maxX == lastX
             && std::abs(delta) < scroll.area.getWidth()
             && std::abs(exactDelta - static_cast<double>(delta)) < 0.0001;
         if (canTranslate)
@@ -848,7 +852,8 @@ private:
         const int width = area.getWidth();
         const int offset = static_cast<int>(-origin % width);
         return { area, offset < 0 ? offset + width : offset, contentOrigin, content,
-                 retainTranslatedTimeline && hasUnobstructedBody(root, *content, bodyInRoot) };
+                 retainTranslatedTimeline && std::abs(origin) < (1 << 21)
+                     && hasUnobstructedBody(root, *content, bodyInRoot) };
     }
 
     void timerCallback() override
