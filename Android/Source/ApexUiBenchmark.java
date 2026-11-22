@@ -28,6 +28,9 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private final ApexImmersiveActivity activity;
     private final View decor;
     private final String renderer;
+    private final String panReplay;
+    private final boolean slowPanReplay;
+    private final float physicalScale;
     private final int left, top, width, height;
     private final MotionEvent.PointerProperties[] properties = new MotionEvent.PointerProperties[2];
     private final MotionEvent.PointerCoords[] coordinates = new MotionEvent.PointerCoords[2];
@@ -48,13 +51,18 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private static native void nativeUseFrameTiles(boolean enabled, boolean reduceMotion,
                                                  boolean framePaced, boolean suppressMasterPreview,
                                                  boolean reuseHorizontalBitmaps, boolean preciseArrangerDamage,
-                                                 boolean retainTranslatedTimeline, boolean legacyFullTreeRaster);
+                                                 boolean retainTranslatedTimeline, boolean legacyFullTreeRaster,
+                                                 boolean slowPanReplay, boolean legacyHorizontalFilter);
     private static native long[] nativeWindowDrawSamples(boolean finish);
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
         activity = owner;
         decor = owner.getWindow().getDecorView();
         renderer = owner.getIntent().getStringExtra("apex_renderer");
+        final String requestedPan = owner.getIntent().getStringExtra("apex_pan_replay");
+        panReplay = requestedPan == null ? "normal" : requestedPan;
+        slowPanReplay = !"normal".equals(panReplay);
+        physicalScale = owner.getResources().getDisplayMetrics().density;
         left = x; top = y; width = w; height = h;
         for (int i = 0; i < 2; ++i) {
             properties[i] = new MotionEvent.PointerProperties();
@@ -77,7 +85,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             activity.getIntent().getBooleanExtra("apex_horizontal_bitmap_reuse", false),
             activity.getIntent().getBooleanExtra("apex_precise_arranger_damage", false),
             activity.getIntent().getBooleanExtra("apex_retain_translated_timeline", false),
-            activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false));
+            activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false),
+            slowPanReplay, "threshold-filter".equals(panReplay));
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
@@ -129,6 +138,16 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
 
     private boolean isPinch() { return phase == 1 || phase == 2 || phase == 6 || phase == 7; }
 
+    private float panCoordinate(double start, double span, int direction, double progress) {
+        if (!slowPanReplay)
+            return (float)(start + direction * progress * span);
+        // Move past drag slop before replaying exactly one logical pixel per
+        // event. The initial fractional position exercises viewport truncation.
+        final double origin = Math.floor(start / physicalScale) + 0.55;
+        final double steps = moves == 0 ? 0.0 : Math.min(27 + moves, span / physicalScale);
+        return (float)((origin + direction * steps) * physicalScale);
+    }
+
     private void position(double progress) {
         if (phase == 6 || phase == 7) {
             final double spread = 0.13 + (phase == 6 ? progress : 1.0 - progress) * 0.20;
@@ -137,15 +156,15 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             coordinates[1].y = (float)(top + height * (0.5 + spread));
         } else if (phase == 5) {
             coordinates[0].x = (float)(left + width * 0.82);
-            coordinates[0].y = (float)(top + height * (0.82 - progress * 0.55));
+            coordinates[0].y = panCoordinate(top + height * 0.82, height * 0.55, -1, progress);
         } else if (isPinch()) {
             final double spread = 0.13 + (phase == 1 ? progress : 1.0 - progress) * 0.20;
             coordinates[0].x = (float)(left + width * (0.5 - spread));
             coordinates[1].x = (float)(left + width * (0.5 + spread));
             coordinates[0].y = coordinates[1].y = (float)(top + height * 0.5);
         } else {
-            coordinates[0].x = (float)(left + width *
-                (phase == 4 ? 0.22 + progress * 0.55 : 0.82 - progress * 0.55));
+            coordinates[0].x = panCoordinate(left + width * (phase == 4 ? 0.22 : 0.82),
+                width * 0.55, phase == 4 ? 1 : -1, progress);
             coordinates[0].y = top + height * 0.82f;
         }
     }
@@ -259,6 +278,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 activity.getIntent().getBooleanExtra("apex_retain_translated_timeline", false));
             result.put("legacy_full_tree_raster",
                 activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false));
+            result.put("pan_replay", panReplay);
             result.put("metric", "UI Choreographer callback intervals; not presented FPS");
             result.put("events", eventCount);
             result.put("droppedWindowFrames", droppedWindowFrames);

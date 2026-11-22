@@ -231,13 +231,16 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
              reuse_horizontal_bitmaps: bool = False,
              precise_arranger_damage: bool = False,
              retain_translated_timeline: bool = False,
-             legacy_full_tree_raster: bool = False) -> dict:
+             legacy_full_tree_raster: bool = False,
+             pan_replay: str = "normal") -> dict:
     # Only a disposable CI emulator may disable the master waveform.
     variant = "retained-scroll" if retain_translated_timeline else (
         "precise-damage" if precise_arranger_damage else (
             "horizontal-reuse" if reuse_horizontal_bitmaps else renderer))
     if legacy_full_tree_raster:
         variant = "legacy-split"
+    if pan_replay != "normal":
+        variant = pan_replay
     name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
@@ -254,7 +257,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         "--ez", "apex_retain_translated_timeline",
         "true" if retain_translated_timeline else "false",
         "--ez", "apex_legacy_full_tree_raster",
-        "true" if legacy_full_tree_raster else "false")
+        "true" if legacy_full_tree_raster else "false",
+        "--es", "apex_pan_replay", pan_replay)
     deadline = time.monotonic() + 100
     ready = None
     before = False
@@ -324,6 +328,18 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     if result is None:
         raise RuntimeError(f"{name}: no native runtime result within 100 seconds")
     result["phases"] = [phases[key] for key in PHASES if key in phases]
+    if result.get("pan_replay") != pan_replay:
+        raise ValueError(f"{name}: wrong pan replay")
+    if pan_replay != "normal":
+        cadence = re.findall(r"PAN_CADENCE x=(\d+),(\d+),(\d+) y=(\d+),(\d+),(\d+)", full_log)
+        if len(cadence) != len(PHASES):
+            raise ValueError(f"{name}: missing native slow pan observations")
+        for phase, counts in zip(result["phases"], cadence):
+            steps = [int(count) for count in counts]
+            phase["unitPanSteps"] = {"x": steps[:3], "y": steps[3:]}
+        for key, axis in (("pan", "x"), ("reverse", "x"), ("vertical-pan", "y")):
+            if not sum(phases[key]["unitPanSteps"][axis]):
+                raise ValueError(f"{name}: no unit steps observed in {key}")
     (output / f"{name}.json").write_text(json.dumps(result, indent=2))
     screenshot(output / f"{name}-after.png")
     record_focus(output / f"{name}-after-window.txt")
@@ -362,7 +378,9 @@ def main() -> int:
     results = []
     failures = []
     try:
-        for scene in ("recording", "playback", "empty", "clip", "deep"):
+        for scenario in ("slow-clip", "recording", "playback", "empty", "clip", "deep"):
+            slow_pan = scenario == "slow-clip"
+            scene = "clip" if slow_pan else scenario
             # Compare the 9.9.3 peer traversal and its replacement with the
             # same compositor, waveform visibility, and input sequence.
             orders = (("legacy-split", "retained-scroll"), ("retained-scroll", "legacy-split"))
@@ -370,9 +388,12 @@ def main() -> int:
                 orders = (("precise-damage", *orders[0]), (*orders[1], "precise-damage"))
             if scene == "deep":
                 orders += (("int-array",),)
+            if slow_pan:
+                orders = (("threshold-filter", "continuous-filter"),
+                          ("continuous-filter", "threshold-filter"))
             for repeat, order in enumerate(orders, 1):
                 for variant in order:
-                    retain_translation = variant in ("legacy-split", "retained-scroll")
+                    retain_translation = slow_pan or variant in ("legacy-split", "retained-scroll")
                     reuse_horizontal = retain_translation or variant == "precise-damage"
                     renderer = "frame-paced" if reuse_horizontal else variant
                     name = f"{scene}-{variant}-{repeat}"
@@ -381,7 +402,8 @@ def main() -> int:
                                           reuse_horizontal_bitmaps=reuse_horizontal,
                                           precise_arranger_damage=reuse_horizontal,
                                           retain_translated_timeline=retain_translation,
-                                          legacy_full_tree_raster=variant == "legacy-split")
+                                          legacy_full_tree_raster=variant == "legacy-split",
+                                          pan_replay=variant if slow_pan else "normal")
                         results.append(result)
                         print(f"Runtime gesture/surface checks passed: {name}", flush=True)
                     except Exception as error:
@@ -430,6 +452,15 @@ def main() -> int:
                   f"checks/event={scans_per_scroll:.2f}, "
                   f"arranger pixels reused={reused:,}/redrawn={redrawn:,} "
                   f"cache pixels shifted={copied:,} rebases={rebased}")
+    for result in results:
+        if result["pan_replay"] == "normal":
+            continue
+        for phase in result["phases"]:
+            axis = {"pan": "x", "reverse": "x", "vertical-pan": "y"}.get(phase["phase"])
+            if axis is not None:
+                hold, unit, jump = phase["unitPanSteps"][axis]
+                print(f"[PAN-CADENCE] {result['pan_replay']} pass={result['repeat']} {phase['phase']} "
+                      f"hold={hold} unit={unit} jump={jump}", flush=True)
     for scene in ("empty", "clip", "playback", "recording", "deep"):
         for repeat in (1, 2):
             paired = {r["variant"]: r for r in results

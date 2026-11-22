@@ -79,6 +79,39 @@ int main()
     assert(TouchNavigationMath::followHorizontalPan(100.f, 164.f, 0.6f) == 164.f);
     assert(TouchNavigationMath::followHorizontalPan(164.f, 90.f, 0.6f) == 90.f);
     assert(std::abs(TouchNavigationMath::followHorizontalPan(100.f, 101.f, 0.6f) - 100.4f) < 0.001f);
+    // An input step of one logical pixel per display frame used to
+    // alternate between holding still and jumping two pixels. Reproduce the
+    // actual Point::toInt truncation and cover both drag directions.
+    for (const int refreshRate : { 60, 90, 120 })
+    {
+        const auto retained = static_cast<float>(std::pow(0.6, 60.0 / refreshRate));
+        for (const int direction : { -1, 1 })
+        {
+            constexpr float start = 200.55f;
+            float legacy = start, smooth = start;
+            int legacyPosition = 1000, smoothPosition = 1000;
+            int holds = 0, jumps = 0;
+            for (int frame = 1; frame <= 200; ++frame)
+            {
+                const float observed = start + static_cast<float>(direction * frame);
+                legacy = TouchNavigationMath::followHorizontalPan(legacy, observed, retained);
+                smooth = TouchNavigationMath::smoothTouchPan(smooth, observed, retained);
+                const int oldNext = TouchNavigationMath::panPosition(
+                    1000, static_cast<int>(legacy) - static_cast<int>(start), 4000);
+                const int newNext = TouchNavigationMath::panPosition(
+                    1000, static_cast<int>(smooth) - static_cast<int>(start), 4000);
+                if (frame > 40)
+                {
+                    holds += oldNext == legacyPosition;
+                    jumps += std::abs(oldNext - legacyPosition) == 2;
+                    assert(newNext - smoothPosition == -direction);
+                }
+                legacyPosition = oldNext;
+                smoothPosition = newNext;
+            }
+            assert(holds == 80 && jumps == 80);
+        }
+    }
     static_assert(TouchNavigationMath::touchPanNeedsDetailRepaint(true, false));
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(false, false));
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(true, true));

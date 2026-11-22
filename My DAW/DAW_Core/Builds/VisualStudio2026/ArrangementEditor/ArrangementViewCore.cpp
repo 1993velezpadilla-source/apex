@@ -37,7 +37,13 @@ namespace juce
 }
 #endif
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-namespace juce { void noteApexTimelineMotion(Component& viewport); }
+namespace juce
+{
+    void noteApexTimelineMotion(Component& viewport);
+    bool isApexLegacyHorizontalFilterEnabled() noexcept;
+    bool isApexSlowPanReplayEnabled() noexcept;
+    void recordApexTouchPanForBenchmark(Point<float> finger, Point<int> origin) noexcept;
+}
 #endif
 
 namespace ArrangementEditor
@@ -1547,8 +1553,9 @@ namespace ArrangementEditor
             // One finger pans the timeline — anchored, with a 6 px slop so a
             // small nudge does not register, and the release velocity tracked
             // for the iOS momentum.
-            // Preserve the vertical filter and let deliberate horizontal
-            // movement track the finger as soon as a display frame arrives.
+            // Use one continuous filter for both axes on Android. A
+            // threshold bypass can alternate a stationary frame and a jump
+            // during a slow, steady drag.
             const auto localRaw = firstTouch; // screen-space; never shifts as the viewport pans
             if (! m_smoothedTouchValid)
             {
@@ -1557,10 +1564,25 @@ namespace ArrangementEditor
             }
             else
             {
-                const float retained = (float)std::pow(0.6, frames);
-                m_smoothedTouchPos.x = TouchNavigationMath::followHorizontalPan(
-                    m_smoothedTouchPos.x, localRaw.x, retained);
-                m_smoothedTouchPos.y = m_smoothedTouchPos.y * retained + localRaw.y * (1.0f - retained);
+                double filterFrames = frames;
+               #if JUCE_ANDROID
+                bool legacyHorizontalFilter = false;
+                #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                legacyHorizontalFilter = juce::isApexLegacyHorizontalFilterEnabled();
+                // Replay consecutive 60 Hz input samples independently of
+                // the emulator's rendering cadence.
+                if (juce::isApexSlowPanReplayEnabled())
+                    filterFrames = 1.0;
+                #endif
+               #else
+                constexpr bool legacyHorizontalFilter = true;
+               #endif
+                const auto retained = static_cast<float>(std::pow(0.6, filterFrames));
+                m_smoothedTouchPos.x = legacyHorizontalFilter
+                    ? TouchNavigationMath::followHorizontalPan(m_smoothedTouchPos.x, localRaw.x, retained)
+                    : TouchNavigationMath::smoothTouchPan(m_smoothedTouchPos.x, localRaw.x, retained);
+                m_smoothedTouchPos.y = TouchNavigationMath::smoothTouchPan(
+                    m_smoothedTouchPos.y, localRaw.y, retained);
             }
             const auto posScreen = m_smoothedTouchPos.toInt();
             const auto local = getLocalPoint(nullptr, posScreen).toFloat();
@@ -1662,6 +1684,10 @@ namespace ArrangementEditor
 
                 viewport->setViewPosition(nextX, nextY);
             }
+           #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            if (juce::isApexSlowPanReplayEnabled())
+                juce::recordApexTouchPanForBenchmark(localRaw, viewport->getViewPosition());
+           #endif
 
             const auto delta = pos - m_lastTouchPanPos;
             const double retention = std::pow(0.7, frames);

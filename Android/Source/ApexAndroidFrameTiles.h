@@ -55,6 +55,8 @@ static bool horizontalBitmapReuse = false;
 static bool preciseArrangerDamage = false;
 static bool retainTranslatedTimeline = false;
 static bool benchmarkLegacyFullTreeRaster = false;
+static bool benchmarkSlowPanReplay = false;
+static bool benchmarkLegacyHorizontalFilter = false;
 // Only the disposable Android UI benchmark may suppress the master preview.
 static bool benchmarkSuppressMasterPreview = false;
 #else
@@ -144,6 +146,36 @@ struct HorizontalMoveDamage
 // resets samples at every measured gesture, not at APK startup.
 static bool measuring = false;
 static uint32_t measurementEpoch = 0;
+
+struct TouchPanCadence
+{
+    Point<float> previousFinger;
+    Point<int> previousOrigin;
+    std::array<int, 3> x {}, y {};
+    bool initialised = false;
+
+    void observe(Point<float> finger, Point<int> origin) noexcept
+    {
+        if (initialised && finger == previousFinger)
+            return;
+
+        if (initialised)
+        {
+            // Compare viewport travel only against a new, one-logical-pixel
+            // input step. Ignore the initial drag through the touch slop.
+            const auto input = finger - previousFinger;
+            const auto travel = origin - previousOrigin;
+            if (std::abs(std::abs(input.x) - 1.0f) < 0.15f)
+                ++x[static_cast<std::size_t>(jmin(2, std::abs(travel.x)))];
+            if (std::abs(std::abs(input.y) - 1.0f) < 0.15f)
+                ++y[static_cast<std::size_t>(jmin(2, std::abs(travel.y)))];
+        }
+        previousFinger = finger;
+        previousOrigin = origin;
+        initialised = true;
+    }
+};
+static TouchPanCadence touchPanCadence;
 #endif
 
 struct Damage
@@ -1258,11 +1290,31 @@ static constexpr bool useTiles = true;
 }
 
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+namespace juce
+{
+bool isApexLegacyHorizontalFilterEnabled() noexcept
+{
+    return apexAndroidFrame::benchmarkLegacyHorizontalFilter;
+}
+
+bool isApexSlowPanReplayEnabled() noexcept
+{
+    return apexAndroidFrame::benchmarkSlowPanReplay;
+}
+
+void recordApexTouchPanForBenchmark(Point<float> finger, Point<int> origin) noexcept
+{
+    if (apexAndroidFrame::measuring)
+        apexAndroidFrame::touchPanCadence.observe(finger, origin);
+}
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced,
     jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage,
-    jboolean retainTranslation, jboolean legacyFullTreeRaster)
+    jboolean retainTranslation, jboolean legacyFullTreeRaster,
+    jboolean slowPanReplay, jboolean legacyHorizontalFilter)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
@@ -1272,6 +1324,8 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     juce::apexAndroidFrame::preciseArrangerDamage = preciseDamage == JNI_TRUE;
     juce::apexAndroidFrame::retainTranslatedTimeline = retainTranslation == JNI_TRUE;
     juce::apexAndroidFrame::benchmarkLegacyFullTreeRaster = legacyFullTreeRaster == JNI_TRUE;
+    juce::apexAndroidFrame::benchmarkSlowPanReplay = slowPanReplay == JNI_TRUE;
+    juce::apexAndroidFrame::benchmarkLegacyHorizontalFilter = legacyHorizontalFilter == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
@@ -1285,10 +1339,16 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
         bitmapSubmitSamples = 0;
         tileUploadSamples = 0;
         frameCount = 0;
+        touchPanCadence = {};
         ++measurementEpoch;
         ComponentPaintProbe::reset();
         return nullptr;
     }
+    if (benchmarkSlowPanReplay)
+        __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+            "PAN_CADENCE x=%d,%d,%d y=%d,%d,%d",
+            touchPanCadence.x[0], touchPanCadence.x[1], touchPanCadence.x[2],
+            touchPanCadence.y[0], touchPanCadence.y[1], touchPanCadence.y[2]);
     ComponentPaintProbe::logTop(frameCount);
     std::vector<jlong> values;
     values.reserve(frameCount * 10);
