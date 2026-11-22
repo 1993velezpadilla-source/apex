@@ -27,7 +27,8 @@ def validate_result(result: dict, scene: str, renderer: str,
                     suppress_master_preview: bool = False,
                     reuse_horizontal_bitmaps: bool = False,
                     precise_arranger_damage: bool = False,
-                    retain_translated_timeline: bool = False) -> None:
+                    retain_translated_timeline: bool = False,
+                    legacy_full_tree_raster: bool = False) -> None:
     if result.get("error"):
         raise ValueError("Native benchmark error: " + str(result["error"]))
     phases = result.get("phases", [])
@@ -46,6 +47,8 @@ def validate_result(result: dict, scene: str, renderer: str,
         raise ValueError("Java arranger damage clipping switch mismatch")
     if bool(result.get("retain_translated_timeline")) != retain_translated_timeline:
         raise ValueError("Java retained timeline translation switch mismatch")
+    if bool(result.get("legacy_full_tree_raster")) != legacy_full_tree_raster:
+        raise ValueError("Java peer traversal comparison switch mismatch")
     for phase in phases:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
@@ -60,6 +63,12 @@ def validate_result(result: dict, scene: str, renderer: str,
             raise ValueError("The requested native presentation path was not used")
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
+        multi_raster = phase["peerMultiRasterFrames"]
+        if not legacy_full_tree_raster and multi_raster:
+            raise ValueError(f"{phase['phase']} painted the window tree more than once per frame")
+        if (legacy_full_tree_raster and scene != "deep"
+                and phase["phase"] in ("pan", "reverse") and not multi_raster):
+            raise ValueError(f"{scene} {phase['phase']} did not exercise the 9.9.3 double traversal")
         before, after = phase["before"], phase["after"]
         if bool(after.get("masterPreviewSuppressedForBenchmark")) != suppress_master_preview:
             raise ValueError("Native master preview diagnostic switch mismatch")
@@ -221,11 +230,14 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
              suppress_master_preview: bool = False,
              reuse_horizontal_bitmaps: bool = False,
              precise_arranger_damage: bool = False,
-             retain_translated_timeline: bool = False) -> dict:
+             retain_translated_timeline: bool = False,
+             legacy_full_tree_raster: bool = False) -> dict:
     # Only a disposable CI emulator may disable the master waveform.
     variant = "retained-scroll" if retain_translated_timeline else (
         "precise-damage" if precise_arranger_damage else (
             "horizontal-reuse" if reuse_horizontal_bitmaps else renderer))
+    if legacy_full_tree_raster:
+        variant = "legacy-split"
     name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
@@ -240,7 +252,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         "--ez", "apex_precise_arranger_damage",
         "true" if precise_arranger_damage else "false",
         "--ez", "apex_retain_translated_timeline",
-        "true" if retain_translated_timeline else "false")
+        "true" if retain_translated_timeline else "false",
+        "--ez", "apex_legacy_full_tree_raster",
+        "true" if legacy_full_tree_raster else "false")
     deadline = time.monotonic() + 100
     ready = None
     before = False
@@ -314,7 +328,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     screenshot(output / f"{name}-after.png")
     record_focus(output / f"{name}-after-window.txt")
     validate_result(result, scene, renderer, suppress_master_preview,
-                    reuse_horizontal_bitmaps, precise_arranger_damage, retain_translated_timeline)
+                    reuse_horizontal_bitmaps, precise_arranger_damage, retain_translated_timeline,
+                    legacy_full_tree_raster)
     first = (output / f"{name}-before.png").read_bytes()
     last = (output / f"{name}-after.png").read_bytes()
     if hashlib.sha256(first).digest() == hashlib.sha256(last).digest():
@@ -347,22 +362,26 @@ def main() -> int:
     results = []
     failures = []
     try:
-        for scene in ("empty", "clip", "playback", "recording", "deep"):
-            # 9.8 production policy vs damage-only scroll, counterbalanced.
-            # Both runs keep the imported clip, master and live waveforms visible.
-            orders = (("precise-damage", "retained-scroll"), ("retained-scroll", "precise-damage"))
+        for scene in ("recording", "playback", "empty", "clip", "deep"):
+            # Compare the 9.9.3 peer traversal and its replacement with the
+            # same compositor, waveform visibility, and input sequence.
+            orders = (("legacy-split", "retained-scroll"), ("retained-scroll", "legacy-split"))
+            if scene == "recording":
+                orders = (("precise-damage", *orders[0]), (*orders[1], "precise-damage"))
             if scene == "deep":
                 orders += (("int-array",),)
             for repeat, order in enumerate(orders, 1):
                 for variant in order:
-                    reuse_horizontal = variant in ("precise-damage", "retained-scroll")
+                    retain_translation = variant in ("legacy-split", "retained-scroll")
+                    reuse_horizontal = retain_translation or variant == "precise-damage"
                     renderer = "frame-paced" if reuse_horizontal else variant
                     name = f"{scene}-{variant}-{repeat}"
                     try:
                         result = run_case(args.output, renderer, scene, repeat,
                                           reuse_horizontal_bitmaps=reuse_horizontal,
                                           precise_arranger_damage=reuse_horizontal,
-                                          retain_translated_timeline=variant == "retained-scroll")
+                                          retain_translated_timeline=retain_translation,
+                                          legacy_full_tree_raster=variant == "legacy-split")
                         results.append(result)
                         print(f"Runtime gesture/surface checks passed: {name}", flush=True)
                     except Exception as error:
@@ -402,6 +421,7 @@ def main() -> int:
                   f"worst={phase['ui_interval_worst_ms']:.1f} ms, "
                   f"peer draw p95={phase['peerWallMs']['p95']:.2f} ms, "
                   f"peer transfer p95={phase['peerTransferMs']['p95']:.2f} ms, "
+                  f"repeated window rasters={phase['peerMultiRasterFrames']}, "
                   f"window draw p95={phase['windowDrawMs']['p95']:.2f} ms, "
                   f"GPU p95={phase['windowGpuMs']['p95']:.2f} ms, "
                   f"bitmap pixels updated/reused={phase.get('peerMeanUpdatedTilePixels', 0):,}/"
@@ -412,21 +432,25 @@ def main() -> int:
                   f"cache pixels shifted={copied:,} rebases={rebased}")
     for scene in ("empty", "clip", "playback", "recording", "deep"):
         for repeat in (1, 2):
-            paired = {r["retain_translated_timeline"]: r for r in results
+            paired = {r["variant"]: r for r in results
                       if r["scene"] == scene and r["repeat"] == repeat
                       and r["horizontal_bitmap_reuse"]
                       and not r["master_preview_suppressed"]}
-            if len(paired) < 2:
+            if "retained-scroll" not in paired:
                 continue
-            for before, after in zip(paired[False]["phases"], paired[True]["phases"]):
-                print(f"[SCROLL-A/B] {scene} pass={repeat} {after['phase']} "
-                      f"callback p95={before['ui_interval_p95_ms']:.1f}/{after['ui_interval_p95_ms']:.1f}ms "
-                      f"worst={before['ui_interval_worst_ms']:.1f}/{after['ui_interval_worst_ms']:.1f}ms "
-                      f"window p95={before['windowTotalMs']['p95']:.1f}/{after['windowTotalMs']['p95']:.1f}ms "
-                      f"raster CPU p95={before['peerRasterCpuMs']['p95']:.1f}/{after['peerRasterCpuMs']['p95']:.1f}ms "
-                      f"raster px/frame={before.get('peerMeanPixels', 0):,}/{after.get('peerMeanPixels', 0):,} "
-                      f"retained scroll frames={after['peerRetainedScrollFrames']}/{after['peerWallMs']['count']} "
-                      f"retained px={after['peerRetainedScrollPixels']:,}")
+            for control in ("legacy-split", "precise-damage"):
+                if control not in paired:
+                    continue
+                for before, after in zip(paired[control]["phases"], paired["retained-scroll"]["phases"]):
+                    print(f"[SCROLL-A/B] {scene} pass={repeat} {after['phase']} control={control} "
+                          f"callback p95={before['ui_interval_p95_ms']:.1f}/{after['ui_interval_p95_ms']:.1f}ms "
+                          f"worst={before['ui_interval_worst_ms']:.1f}/{after['ui_interval_worst_ms']:.1f}ms "
+                          f"window p95={before['windowTotalMs']['p95']:.1f}/{after['windowTotalMs']['p95']:.1f}ms "
+                          f"raster CPU p95={before['peerRasterCpuMs']['p95']:.1f}/{after['peerRasterCpuMs']['p95']:.1f}ms "
+                          f"raster px/frame={before.get('peerMeanPixels', 0):,}/{after.get('peerMeanPixels', 0):,} "
+                          f"repeated window rasters={before['peerMultiRasterFrames']}/{after['peerMultiRasterFrames']} "
+                          f"retained scroll frames={after['peerRetainedScrollFrames']}/{after['peerWallMs']['count']} "
+                          f"retained px={after['peerRetainedScrollPixels']:,}")
     # This job validates gesture correctness, NOT 60fps presentation.
     # The x86_64 SwiftShader emulator reports Choreographer callback spacing,
     # not SurfaceFlinger-presented frame intervals. Report misses explicitly

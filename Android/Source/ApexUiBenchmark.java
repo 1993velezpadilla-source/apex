@@ -48,7 +48,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private static native void nativeUseFrameTiles(boolean enabled, boolean reduceMotion,
                                                  boolean framePaced, boolean suppressMasterPreview,
                                                  boolean reuseHorizontalBitmaps, boolean preciseArrangerDamage,
-                                                 boolean retainTranslatedTimeline);
+                                                 boolean retainTranslatedTimeline, boolean legacyFullTreeRaster);
     private static native long[] nativeWindowDrawSamples(boolean finish);
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
@@ -76,7 +76,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false),
             activity.getIntent().getBooleanExtra("apex_horizontal_bitmap_reuse", false),
             activity.getIntent().getBooleanExtra("apex_precise_arranger_damage", false),
-            activity.getIntent().getBooleanExtra("apex_retain_translated_timeline", false));
+            activity.getIntent().getBooleanExtra("apex_retain_translated_timeline", false),
+            activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false));
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
@@ -256,6 +257,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 activity.getIntent().getBooleanExtra("apex_precise_arranger_damage", false));
             result.put("retain_translated_timeline",
                 activity.getIntent().getBooleanExtra("apex_retain_translated_timeline", false));
+            result.put("legacy_full_tree_raster",
+                activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false));
             result.put("metric", "UI Choreographer callback intervals; not presented FPS");
             result.put("events", eventCount);
             result.put("droppedWindowFrames", droppedWindowFrames);
@@ -264,7 +267,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     }
 
     private void addPeerTimings(JSONObject entry, long[] samples) throws Exception {
-        final int stride = 9;
+        final int stride = 10;
         if (samples.length % stride != 0) throw new IllegalArgumentException("Invalid APEX peer sample stride");
         final int count = samples.length / stride;
         final long[] wall = new long[count];
@@ -276,7 +279,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         int tiledFrames = 0;
         int reducedTimelineFrames = 0, scrollTileFrames = 0;
         long paintedPixels = 0, updatedTilePixels = 0, reusedTilePixels = 0;
-        int retainedScrollFrames = 0;
+        int retainedScrollFrames = 0, multiRasterFrames = 0;
         long retainedScrollPixels = 0;
         for (int i = 0; i < count; ++i) {
             final int start = i * stride;
@@ -292,6 +295,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             final long retained = samples[start + 8];
             if (retained > 0) ++retainedScrollFrames;
             retainedScrollPixels += retained;
+            if (samples[start + 9] > 1) ++multiRasterFrames;
             if (samples[start + 4] != 0) ++tiledFrames;
             if (samples[start + 4] == 2) ++reducedTimelineFrames;
             if (samples[start + 4] == 3) ++scrollTileFrames;
@@ -306,6 +310,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         entry.put("peerTiledFrames", tiledFrames);
         entry.put("peerReducedTimelineFrames", reducedTimelineFrames);
         entry.put("peerScrollTileFrames", scrollTileFrames);
+        entry.put("peerMultiRasterFrames", multiRasterFrames);
         entry.put("peerRetainedScrollFrames", retainedScrollFrames);
         entry.put("peerRetainedScrollPixels", retainedScrollPixels);
         if (count != 0) {

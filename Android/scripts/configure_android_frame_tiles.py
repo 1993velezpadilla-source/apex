@@ -387,11 +387,19 @@ public:
 
 def align_retained_timeline_origin(component: Path, software_renderer: Path) -> None:
     contents = component.read_text(encoding="utf-8")
-    if "apexAndroidFrame::applyTimelineRasterOrigin" not in contents:
-        contents = replace(contents, "    g.setOrigin (getPosition());", """\
+    if "apexAndroidFrame::paintAlignedTimeline" not in contents:
+        old_origin = """\
     g.setOrigin (getPosition());
    #if JUCE_ANDROID
     apexAndroidFrame::applyTimelineRasterOrigin (*this, g);
+   #endif"""
+        original = old_origin if old_origin in contents else "    g.setOrigin (getPosition());"
+        contents = replace(contents, original, """\
+    g.setOrigin (getPosition());
+   #if JUCE_ANDROID
+    if (cachedImage == nullptr && apexAndroidFrame::paintAlignedTimeline (*this, g, [&]
+        { paintEntireComponent (g, false); }))
+        return;
    #endif""")
         component.write_text(contents, encoding="utf-8")
 
@@ -410,7 +418,28 @@ def align_retained_timeline_origin(component: Path, software_renderer: Path) -> 
     }
 
     // Return the actual raster damage in local device pixels.""")
-        software_renderer.write_text(contents, encoding="utf-8")
+    if "getApexDeviceClipBounds" not in contents:
+        contents = replace(contents, "    // Return the actual raster damage in local device pixels.", """\
+    Rectangle<int> getApexDeviceClipBounds() const
+    {
+        return stack->clip != nullptr ? stack->clip->getClipBounds() : Rectangle<int>{};
+    }
+
+    // The timeline body boundary is already in physical bitmap coordinates.
+    // Preserve the exact current clip, including every existing exclusion.
+    bool restrictApexDeviceClip (Rectangle<int> bounds, bool exclude)
+    {
+        if (stack->clip == nullptr)
+            return false;
+
+        stack->cloneClipIfMultiplyReferenced();
+        stack->clip = exclude ? stack->clip->excludeClipRectangle (bounds)
+                             : stack->clip->clipToRectangle (bounds);
+        return stack->clip != nullptr;
+    }
+
+    // Return the actual raster damage in local device pixels.""")
+    software_renderer.write_text(contents, encoding="utf-8")
 
 
 def configure(root: Path) -> None:

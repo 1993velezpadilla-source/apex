@@ -54,6 +54,7 @@ static bool framePacingEnabled = true;
 static bool horizontalBitmapReuse = false;
 static bool preciseArrangerDamage = false;
 static bool retainTranslatedTimeline = false;
+static bool benchmarkLegacyFullTreeRaster = false;
 // Only the disposable Android UI benchmark may suppress the master preview.
 static bool benchmarkSuppressMasterPreview = false;
 #else
@@ -78,16 +79,46 @@ struct TimelineRasterOrigin
 {
     const Component* content = nullptr;
     int deviceX = 0;
+    Rectangle<int> body;
 };
 
 static thread_local TimelineRasterOrigin timelineRasterOrigin;
 
-static void applyTimelineRasterOrigin(const Component& component, Graphics& graphics)
+template <typename Paint>
+static bool paintAlignedTimeline(const Component& component, Graphics& graphics, Paint&& paint)
 {
     if (timelineRasterOrigin.content != &component)
-        return;
-    if (auto* renderer = dynamic_cast<LowLevelGraphicsSoftwareRenderer*>(&graphics.getInternalContext()))
-        renderer->setApexDeviceRasterOriginX(timelineRasterOrigin.deviceX);
+        return false;
+    auto* renderer = dynamic_cast<LowLevelGraphicsSoftwareRenderer*>(&graphics.getInternalContext());
+    if (renderer == nullptr)
+        return false;
+
+    const auto body = timelineRasterOrigin.body;
+    const auto clip = renderer->getApexDeviceClipBounds();
+    if (!body.isEmpty())
+    {
+        if (!clip.intersects(body))
+            return false;
+        if (!body.contains(clip))
+        {
+            // Split only the viewed component. The peer, its siblings and
+            // ancestor chrome traverse the original union once.
+            {
+                // paintWithinParentContext already flushed Graphics' pending
+                // save via setOrigin. These saves are on the same renderer.
+                renderer->saveState();
+                const ScopeGuard restore { [renderer] { renderer->restoreState(); } };
+                if (renderer->restrictApexDeviceClip(body, true))
+                    paint();
+            }
+            if (!renderer->restrictApexDeviceClip(body, false))
+                return true;
+        }
+    }
+
+    renderer->setApexDeviceRasterOriginX(timelineRasterOrigin.deviceX);
+    paint();
+    return true;
 }
 
 struct HorizontalMoveDamage
@@ -829,19 +860,26 @@ public:
                 return;
             }
 
-            // Keep the ruler, controls and any occluded part in screen
-            // coordinates. Only the moving body uses the ring's pixel origin.
-            auto stationary = regions;
-            stationary.subtract(retainedArea);
-            if (!stationary.isEmpty())
-                raster(frame, stationary, origin, divisor);
-
-            auto body = regions;
-            body.clipTo(retainedArea);
-            const TimelineRasterOrigin aligned { scroll.content,
-                static_cast<int>(snapDeviceX(scroll.contentOrigin.x, scale) - origin.x) };
+            const auto deviceX = static_cast<int>(snapDeviceX(scroll.contentOrigin.x, scale) - origin.x);
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            if (benchmarkLegacyFullTreeRaster)
+            {
+                // Same APK and bitmap reuse, with the 9.9.3 peer traversal.
+                auto stationary = regions;
+                stationary.subtract(retainedArea);
+                if (!stationary.isEmpty())
+                    raster(frame, stationary, origin, divisor);
+                auto body = regions;
+                body.clipTo(retainedArea);
+                const TimelineRasterOrigin aligned { scroll.content, deviceX, {} };
+                const ScopedValueSetter<TimelineRasterOrigin> useAlignedOrigin(timelineRasterOrigin, aligned);
+                raster(frame, body, origin, divisor);
+                return;
+            }
+           #endif
+            const TimelineRasterOrigin aligned { scroll.content, deviceX, retainedArea };
             const ScopedValueSetter<TimelineRasterOrigin> useAlignedOrigin(timelineRasterOrigin, aligned);
-            raster(frame, body, origin, divisor);
+            raster(frame, regions, origin, divisor);
         };
         if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), rasterTimeline, scroll, moves))
             return false;
@@ -995,6 +1033,7 @@ struct FrameSample
     jlong wallNs = 0, cpuNs = 0, rasterNs = 0, pixels = 0, usedTiles = 0;
     jlong rasterCpuNs = 0;
     jlong updatedTilePixels = 0, reusedTilePixels = 0, retainedScrollPixels = 0;
+    jlong rasterPasses = 0;
 };
 static std::array<FrameSample, 2048> recordedFrames {};
 static std::size_t frameCount = 0;
@@ -1176,6 +1215,7 @@ public:
     {
         if (record)
         {
+            ++sample.rasterPasses;
             for (const auto& area : region)
                 sample.pixels += (jlong)area.getWidth() * area.getHeight();
             beginRaster = Clock::now();
@@ -1222,7 +1262,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced,
     jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage,
-    jboolean retainTranslation)
+    jboolean retainTranslation, jboolean legacyFullTreeRaster)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
@@ -1231,6 +1271,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     juce::apexAndroidFrame::horizontalBitmapReuse = reuseHorizontalBitmaps == JNI_TRUE;
     juce::apexAndroidFrame::preciseArrangerDamage = preciseDamage == JNI_TRUE;
     juce::apexAndroidFrame::retainTranslatedTimeline = retainTranslation == JNI_TRUE;
+    juce::apexAndroidFrame::benchmarkLegacyFullTreeRaster = legacyFullTreeRaster == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
@@ -1250,13 +1291,13 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
     }
     ComponentPaintProbe::logTop(frameCount);
     std::vector<jlong> values;
-    values.reserve(frameCount * 9);
+    values.reserve(frameCount * 10);
     for (std::size_t i = 0; i < frameCount; ++i)
     {
         const auto& f = recordedFrames[i];
         values.insert(values.end(), { f.wallNs, f.cpuNs, f.rasterNs, f.pixels,
                                       f.usedTiles, f.rasterCpuNs, f.updatedTilePixels,
-                                      f.reusedTilePixels, f.retainedScrollPixels });
+                                      f.reusedTilePixels, f.retainedScrollPixels, f.rasterPasses });
     }
     const auto count = (jsize)values.size();
     auto result = env->NewLongArray(count);
