@@ -9944,6 +9944,7 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     state->setProperty("scrollClipChecks", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollClipIterations.load()));
     state->setProperty("arrangerReusePixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerReusePixels.load()));
     state->setProperty("arrangerRasterPixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerRasterPixels.load()));
+    state->setProperty("arrangerPreparedPixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerPreparedPixels.load()));
     state->setProperty("arrangerCacheCopyPixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerCacheCopyPixels.load()));
     state->setProperty("arrangerCacheRebases", static_cast<juce::int64>(TimelinePaintMetrics::arrangerCacheRebases.load()));
     state->setProperty("scrollEvents", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollEvents.load()));

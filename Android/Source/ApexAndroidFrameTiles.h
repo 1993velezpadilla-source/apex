@@ -57,6 +57,7 @@ static bool retainTranslatedTimeline = false;
 static bool benchmarkLegacyFullTreeRaster = false;
 static bool benchmarkSlowPanReplay = false;
 static bool benchmarkLegacyHorizontalFilter = false;
+static bool benchmarkViewportPreparation = false;
 // Only the disposable Android UI benchmark may suppress the master preview.
 static bool benchmarkSuppressMasterPreview = false;
 #else
@@ -1302,6 +1303,11 @@ bool isApexSlowPanReplayEnabled() noexcept
     return apexAndroidFrame::benchmarkSlowPanReplay;
 }
 
+bool isApexViewportPreparationEnabled() noexcept
+{
+    return apexAndroidFrame::benchmarkViewportPreparation;
+}
+
 void recordApexTouchPanForBenchmark(Point<float> finger, Point<int> origin) noexcept
 {
     if (apexAndroidFrame::measuring)
@@ -1314,7 +1320,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced,
     jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage,
     jboolean retainTranslation, jboolean legacyFullTreeRaster,
-    jboolean slowPanReplay, jboolean legacyHorizontalFilter)
+    jboolean slowPanReplay, jboolean legacyHorizontalFilter, jboolean prepareViewport)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
@@ -1326,6 +1332,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     juce::apexAndroidFrame::benchmarkLegacyFullTreeRaster = legacyFullTreeRaster == JNI_TRUE;
     juce::apexAndroidFrame::benchmarkSlowPanReplay = slowPanReplay == JNI_TRUE;
     juce::apexAndroidFrame::benchmarkLegacyHorizontalFilter = legacyHorizontalFilter == JNI_TRUE;
+    juce::apexAndroidFrame::benchmarkViewportPreparation = prepareViewport == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL

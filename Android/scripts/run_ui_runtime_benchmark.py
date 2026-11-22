@@ -16,6 +16,16 @@ import time
 PACKAGE = "com.xziel.apex.mobileportrait"
 PHASES = ("pan", "pinch", "unpinch", "idle", "reverse",
           "vertical-pan", "vertical-pinch", "vertical-unpinch")
+COLD_SCROLL_TRAVERSALS = (
+    ("pan", "return", "revisit", None),
+    ("post-x-pan", "post-x-return", "post-x-revisit", "pinch"),
+    ("post-y-pan", "post-y-return", "post-y-revisit", "vertical-pinch"),
+)
+COLD_SCROLL_PHASES = (
+    *COLD_SCROLL_TRAVERSALS[0][:3], "pinch", *COLD_SCROLL_TRAVERSALS[1][:3],
+    "unpinch", "idle", "reverse", "vertical-pan", "vertical-pinch",
+    *COLD_SCROLL_TRAVERSALS[2][:3], "vertical-unpinch",
+)
 
 
 def adb(*args: str, binary: bool = False):
@@ -31,9 +41,11 @@ def validate_result(result: dict, scene: str, renderer: str,
                     legacy_full_tree_raster: bool = False) -> None:
     if result.get("error"):
         raise ValueError("Native benchmark error: " + str(result["error"]))
-    phases = result.get("phases", [])
-    if tuple(p.get("phase") for p in phases) != PHASES:
+    expected = COLD_SCROLL_PHASES if result.get("cold_scroll_replay") else PHASES
+    if tuple(p.get("phase") for p in result.get("phases", [])) != expected:
         raise ValueError("Missing real gesture phases")
+    measured = {p["phase"]: p for p in result["phases"]}
+    phases = [measured[name] for name in PHASES]
     if result.get("events", 0) < 20:
         raise ValueError("Insufficient delivered touch events")
     if not result.get("hardware_canvas"):
@@ -192,6 +204,48 @@ def validate_result(result: dict, scene: str, renderer: str,
             raise ValueError("Grouped waveform drawing was never exercised during horizontal navigation")
 
 
+def validate_cold_scroll(result: dict) -> None:
+    measured = {p["phase"]: p for p in result["phases"]}
+    preparation = result["prepare_edges"]
+    for first_name, return_name, revisit_name, zoom_name in COLD_SCROLL_TRAVERSALS:
+        first, returned, revisit = (measured[name] for name in
+                                    (first_name, return_name, revisit_name))
+        start, end = first["before"], first["after"]
+        if end["scrollX"] - start["scrollX"] < 50:
+            raise ValueError(f"{first_name} did not travel through a new part of the arranger")
+        if returned["after"]["scrollX"] >= returned["before"]["scrollX"]:
+            raise ValueError(f"{return_name} did not return along the horizontal timeline")
+        for moment in ("before", "after"):
+            a, b = first[moment], revisit[moment]
+            if abs(a["scrollX"] - b["scrollX"]) > 8:
+                raise ValueError(f"{revisit_name} did not revisit the measured interval")
+        for phase in (first, returned, revisit):
+            before, after = phase["before"], phase["after"]
+            for state in (before, after):
+                if any(state[key] != start[key] for key in ("scrollY", "pps", "laneHeight")):
+                    raise ValueError(f"{phase['phase']} changed zoom or moved vertically")
+            if phase["peerRetainedScrollFrames"] < 2:
+                raise ValueError(f"{phase['phase']} did not exercise continuous presentation")
+            if after["rebuilds"] != before["rebuilds"]:
+                raise ValueError(f"{phase['phase']} unexpectedly rebuilt clip renderers")
+            if not preparation and after["arrangerPreparedPixels"]:
+                raise ValueError(f"{phase['phase']} prepared pixels with the baseline switch")
+        previous = measured[zoom_name]["after"]["arrangerPreparedPixels"] if zoom_name else 0
+        prepared = start["arrangerPreparedPixels"] - previous
+        if preparation and prepared <= 0:
+            raise ValueError(f"No offscreen cache preparation before {first_name}")
+        for phase in (first, revisit):
+            after = phase["after"]
+            print(f"[FIRST/REPEAT] {result['scene']} prepared={preparation} {phase['phase']} "
+                  f"x={phase['before']['scrollX']}..{after['scrollX']} "
+                  f"callback p95/worst={phase['ui_interval_p95_ms']:.1f}/"
+                  f"{phase['ui_interval_worst_ms']:.1f}ms "
+                  f"peer CPU p95/worst={phase['peerCpuMs']['p95']:.1f}/"
+                  f"{phase['peerCpuMs']['worst']:.1f}ms "
+                  f"arranger raster pixels={after['arrangerRasterPixels'] - phase['before']['arrangerRasterPixels']:,} "
+                  f"pixels prepared before first pass={prepared:,}", flush=True)
+
+
 def validate_focus(window_dump: str) -> None:
     focus = re.search(r"mCurrentFocus=([^\n]+)", window_dump)
     if focus is None or PACKAGE + "/" not in focus.group(1):
@@ -232,7 +286,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
              precise_arranger_damage: bool = False,
              retain_translated_timeline: bool = False,
              legacy_full_tree_raster: bool = False,
-             pan_replay: str = "normal") -> dict:
+             pan_replay: str = "normal", cold_scroll_replay: bool = False,
+             prepare_edges: bool = True) -> dict:
     # Only a disposable CI emulator may disable the master waveform.
     variant = "retained-scroll" if retain_translated_timeline else (
         "precise-damage" if precise_arranger_damage else (
@@ -241,6 +296,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         variant = "legacy-split"
     if pan_replay != "normal":
         variant = pan_replay
+    if cold_scroll_replay:
+        variant = "cold-scroll-prepared" if prepare_edges else "cold-scroll-baseline"
     name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
@@ -258,7 +315,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         "true" if retain_translated_timeline else "false",
         "--ez", "apex_legacy_full_tree_raster",
         "true" if legacy_full_tree_raster else "false",
-        "--es", "apex_pan_replay", pan_replay)
+        "--es", "apex_pan_replay", pan_replay,
+        "--ez", "apex_cold_scroll_replay", str(cold_scroll_replay).lower(),
+        "--ez", "apex_prepare_edges", str(prepare_edges).lower())
     deadline = time.monotonic() + 100
     ready = None
     before = False
@@ -327,9 +386,12 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
             print(f"[BITMAP-SUBMIT] {name} {line}", flush=True)
     if result is None:
         raise RuntimeError(f"{name}: no native runtime result within 100 seconds")
-    result["phases"] = [phases[key] for key in PHASES if key in phases]
-    if result.get("pan_replay") != pan_replay:
-        raise ValueError(f"{name}: wrong pan replay")
+    expected = COLD_SCROLL_PHASES if cold_scroll_replay else PHASES
+    result["phases"] = [phases[key] for key in expected if key in phases]
+    if (result.get("pan_replay") != pan_replay
+            or result.get("cold_scroll_replay") != cold_scroll_replay
+            or result.get("prepare_edges") != prepare_edges):
+        raise ValueError(f"{name}: wrong pan replay configuration")
     if pan_replay != "normal":
         cadence = re.findall(r"PAN_CADENCE x=(\d+),(\d+),(\d+) y=(\d+),(\d+),(\d+)", full_log)
         if len(cadence) != len(PHASES):
@@ -346,6 +408,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     validate_result(result, scene, renderer, suppress_master_preview,
                     reuse_horizontal_bitmaps, precise_arranger_damage, retain_translated_timeline,
                     legacy_full_tree_raster)
+    if cold_scroll_replay:
+        validate_cold_scroll(result)
     first = (output / f"{name}-before.png").read_bytes()
     last = (output / f"{name}-after.png").read_bytes()
     if hashlib.sha256(first).digest() == hashlib.sha256(last).digest():
@@ -411,6 +475,23 @@ def main() -> int:
                         (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
                         screenshot(args.output / f"{name}-failure.png")
                         print(f"Runtime check FAILED: {name}: {error}", flush=True)
+        for scene, order in (("empty", (False, True)),
+                             ("clip", (True, False)),
+                             ("recording", (False, True))):
+            for prepare_edges in order:
+                name = f"{scene}-cold-scroll-{'prepared' if prepare_edges else 'baseline'}-1"
+                try:
+                    result = run_case(args.output, "frame-paced", scene, 1,
+                                      reuse_horizontal_bitmaps=True, precise_arranger_damage=True,
+                                      retain_translated_timeline=True, cold_scroll_replay=True,
+                                      prepare_edges=prepare_edges)
+                    results.append(result)
+                    print(f"Runtime first/repeat checks passed: {name}", flush=True)
+                except Exception as error:
+                    failures.append({"case": name, "error": str(error)})
+                    (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
+                    screenshot(args.output / f"{name}-failure.png")
+                    print(f"Runtime check FAILED: {name}: {error}", flush=True)
     finally:
         (args.output / "runtime-results.json").write_text(json.dumps({
             "hardware": "CI x86_64 Android emulator; not Pixel Fold",

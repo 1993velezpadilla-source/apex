@@ -631,9 +631,11 @@ namespace ArrangementEditor
         void updateClipAutomationDim();
         void updatePinnedViewportControls(bool restack = true);
         juce::Rectangle<int> getViewportVisibleBounds() const;
+        juce::Rectangle<int> getViewportPaintBounds() const;
        #if JUCE_ANDROID
         class ViewportPaintCache;
         bool m_paintingViewportBackground = false;
+        bool m_paintingViewportOverscan = false;
        #endif
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
         enum class ClipBoundsUpdate { none, time, all };

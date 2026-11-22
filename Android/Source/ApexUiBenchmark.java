@@ -24,12 +24,17 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private static final String TAG = "APEX_UI_BENCH";
     private static final String[] PHASES = {"pan", "pinch", "unpinch", "idle", "reverse",
         "vertical-pan", "vertical-pinch", "vertical-unpinch"};
+    private static final String[] COLD_SCROLL_PHASES = {
+        "pan", "return", "revisit", "pinch", "post-x-pan", "post-x-return", "post-x-revisit",
+        "unpinch", "idle", "reverse", "vertical-pan", "vertical-pinch",
+        "post-y-pan", "post-y-return", "post-y-revisit", "vertical-unpinch"};
     private static final long PHASE_NS = 2500000000L;
     private final ApexImmersiveActivity activity;
     private final View decor;
     private final String renderer;
     private final String panReplay;
-    private final boolean slowPanReplay;
+    private final boolean slowPanReplay, coldScrollReplay, prepareEdges;
+    private final String[] phaseNames;
     private final float physicalScale;
     private final int left, top, width, height;
     private final MotionEvent.PointerProperties[] properties = new MotionEvent.PointerProperties[2];
@@ -37,8 +42,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private final long[] intervals = new long[2048];
     private final long[] inputWall = new long[2048];
     private final long[] inputCpu = new long[2048];
-    private final long[] phaseStarts = new long[PHASES.length];
-    private final long[] phaseEnds = new long[PHASES.length];
+    private final long[] phaseStarts, phaseEnds;
     private final ArrayList<long[]> windowFrames = new ArrayList<>();
     private final HandlerThread metricsThread = new HandlerThread("APEX UI benchmark metrics");
     private final Window.OnFrameMetricsAvailableListener frameListener = this::recordWindowFrame;
@@ -52,7 +56,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                                                  boolean framePaced, boolean suppressMasterPreview,
                                                  boolean reuseHorizontalBitmaps, boolean preciseArrangerDamage,
                                                  boolean retainTranslatedTimeline, boolean legacyFullTreeRaster,
-                                                 boolean slowPanReplay, boolean legacyHorizontalFilter);
+                                                 boolean slowPanReplay, boolean legacyHorizontalFilter,
+                                                 boolean prepareViewport);
     private static native long[] nativeWindowDrawSamples(boolean finish);
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
@@ -62,6 +67,11 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         final String requestedPan = owner.getIntent().getStringExtra("apex_pan_replay");
         panReplay = requestedPan == null ? "normal" : requestedPan;
         slowPanReplay = !"normal".equals(panReplay);
+        coldScrollReplay = owner.getIntent().getBooleanExtra("apex_cold_scroll_replay", false);
+        prepareEdges = owner.getIntent().getBooleanExtra("apex_prepare_edges", true);
+        phaseNames = coldScrollReplay ? COLD_SCROLL_PHASES : PHASES;
+        phaseStarts = new long[phaseNames.length];
+        phaseEnds = new long[phaseNames.length];
         physicalScale = owner.getResources().getDisplayMetrics().density;
         left = x; top = y; width = w; height = h;
         for (int i = 0; i < 2; ++i) {
@@ -86,7 +96,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             activity.getIntent().getBooleanExtra("apex_precise_arranger_damage", false),
             activity.getIntent().getBooleanExtra("apex_retain_translated_timeline", false),
             activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false),
-            slowPanReplay, "threshold-filter".equals(panReplay));
+            slowPanReplay, "threshold-filter".equals(panReplay), prepareEdges);
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
@@ -136,7 +146,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         ++eventCount;
     }
 
-    private boolean isPinch() { return phase == 1 || phase == 2 || phase == 6 || phase == 7; }
+    private String currentPhase() { return phaseNames[phase]; }
+    private boolean isPinch() { return currentPhase().endsWith("pinch"); }
 
     private float panCoordinate(double start, double span, int direction, double progress) {
         if (!slowPanReplay)
@@ -149,22 +160,27 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     }
 
     private void position(double progress) {
-        if (phase == 6 || phase == 7) {
-            final double spread = 0.13 + (phase == 6 ? progress : 1.0 - progress) * 0.20;
+        final String name = currentPhase();
+        if (name.startsWith("vertical-") && isPinch()) {
+            final double spread = 0.13 + ("vertical-pinch".equals(name) ? progress : 1.0 - progress) * 0.20;
             coordinates[0].x = coordinates[1].x = (float)(left + width * 0.55);
             coordinates[0].y = (float)(top + height * (0.5 - spread));
             coordinates[1].y = (float)(top + height * (0.5 + spread));
-        } else if (phase == 5) {
+        } else if ("vertical-pan".equals(name)) {
             coordinates[0].x = (float)(left + width * 0.82);
             coordinates[0].y = panCoordinate(top + height * 0.82, height * 0.55, -1, progress);
         } else if (isPinch()) {
-            final double spread = 0.13 + (phase == 1 ? progress : 1.0 - progress) * 0.20;
+            final double spread = 0.13 + ("pinch".equals(name) ? progress : 1.0 - progress) * 0.20;
             coordinates[0].x = (float)(left + width * (0.5 - spread));
             coordinates[1].x = (float)(left + width * (0.5 + spread));
             coordinates[0].y = coordinates[1].y = (float)(top + height * 0.5);
         } else {
-            coordinates[0].x = panCoordinate(left + width * (phase == 4 ? 0.22 : 0.82),
-                width * 0.55, phase == 4 ? 1 : -1, progress);
+            final boolean returning = "reverse".equals(name) || name.endsWith("return");
+            // Finish the swipe before lifting. A stationary tail makes the
+            // revisit's start/end match the first traversal despite flings.
+            final double travel = coldScrollReplay ? Math.min(1.0, progress / 0.78) : progress;
+            coordinates[0].x = panCoordinate(left + width * (returning ? 0.22 : 0.82),
+                width * 0.55, returning ? 1 : -1, travel);
             coordinates[0].y = top + height * 0.82f;
         }
     }
@@ -176,6 +192,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     @Override public void doFrame(long frameTimeNanos) {
         if (stopped) return;
         try {
+            final String name = currentPhase();
             if (phaseStart == 0) {
                 phaseStart = frameTimeNanos;
                 phaseStarts[phase] = frameTimeNanos;
@@ -184,11 +201,11 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 moves = 0;
                 position(0);
                 JSONObject entry = new JSONObject();
-                entry.put("phase", PHASES[phase]);
+                entry.put("phase", name);
                 entry.put("before", state(false));
                 nativeWindowDrawSamples(false);
                 phases.put(entry);
-                if (phase != 3) {
+                if (!"idle".equals(name)) {
                     send(MotionEvent.ACTION_DOWN, 1);
                     if (isPinch())
                         send(MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2);
@@ -198,9 +215,9 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 intervals[samples++] = frameTimeNanos - lastFrame;
             }
             lastFrame = frameTimeNanos;
-            final double duration = phase >= 5 ? 1_500_000_000L : PHASE_NS;
+            final double duration = name.startsWith("vertical-") ? 1_500_000_000L : PHASE_NS;
             final double progress = Math.min(1.0, (frameTimeNanos - phaseStart) / duration);
-            if (phase != 3) {
+            if (!"idle".equals(name)) {
                 position(progress);
                 send(MotionEvent.ACTION_MOVE, isPinch() ? 2 : 1);
             }
@@ -226,11 +243,17 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 phaseEnds[phase] = frameTimeNanos;
                 ++phase;
                 phaseStart = lastFrame = 0;
-                if (phase == PHASES.length) {
+                if (phase == phaseNames.length) {
                     decor.postDelayed(this::finish, 500);
                     return;
                 }
-                if (phase == 2 && "deep".equals(activity.getIntent().getStringExtra("apex_scene"))) {
+                if (coldScrollReplay && ("pinch".equals(name) || "vertical-pinch".equals(name))) {
+                    // Give the new scale the same settling interval in both
+                    // variants. No pan during this interval visits the region.
+                    decor.postDelayed(() -> Choreographer.getInstance().postFrameCallback(this), 500);
+                    return;
+                }
+                if ("pinch".equals(name) && "deep".equals(activity.getIntent().getStringExtra("apex_scene"))) {
                     Log.i(TAG, "PEAK horizontal");
                     decor.postDelayed(() -> Choreographer.getInstance().postFrameCallback(this), 1800);
                     return;
@@ -279,6 +302,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             result.put("legacy_full_tree_raster",
                 activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false));
             result.put("pan_replay", panReplay);
+            result.put("cold_scroll_replay", coldScrollReplay);
+            result.put("prepare_edges", prepareEdges);
             result.put("metric", "UI Choreographer callback intervals; not presented FPS");
             result.put("events", eventCount);
             result.put("droppedWindowFrames", droppedWindowFrames);
