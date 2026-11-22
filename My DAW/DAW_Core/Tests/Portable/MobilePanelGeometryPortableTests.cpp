@@ -3537,3 +3537,42 @@ constexpr bool closeOrbExtremeDimensionsStayBounded = []() constexpr {
     return true;
 }();
 static_assert(closeOrbExtremeDimensionsStayBounded);
+
+
+// Adversarial phone Mixer toolbar width recovery: overflow must remain a
+// reachable, non-overlapping 44-wide action across split-screen rotation.
+// This only covers portable hit geometry; the 32-high title bar still needs
+// a separate production redesign before it can satisfy 44-high touch targets.
+constexpr bool mixerToolbarWidthTransitionsStaySafe = []() constexpr {
+    for (int width = 0; width <= 160; ++width)
+        for (int height : { 0, 31, 32, 33, 44, 96 })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            if (layout.count < 0 || layout.count > 4) return false;
+            const bool canFit = width >= 46 && height >= 32;
+            if ((layout.count > 0) != canFit) return false;
+            for (int i = 0; i < layout.count; ++i)
+            {
+                const auto button = layout.buttons[i];
+                if (!inside(button.bounds, width, height)) return false;
+                if (button.bounds.width != 44 || button.bounds.height != 32)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!(button.bounds.x >= layout.buttons[j].bounds.x
+                              + layout.buttons[j].bounds.width))
+                        return false;
+            }
+            if (layout.count > 0)
+            {
+                const bool full = width >= 142;
+                if (layout.count != (full ? 3 : width >= 94 ? 2 : 1))
+                    return false;
+                if (layout.buttons[layout.count - 1].action
+                    != (full ? DAW::mobile::phoneMixerReset
+                             : DAW::mobile::phoneMixerOverflow))
+                    return false;
+            }
+        }
+    return true;
+}();
+static_assert(mixerToolbarWidthTransitionsStaySafe);
