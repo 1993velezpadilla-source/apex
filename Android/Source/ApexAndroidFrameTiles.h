@@ -825,8 +825,32 @@ private:
     static Rectangle<int> unobstructedTimelineBody(const Component& root, const Component& content,
                                                     Rectangle<int> bodyInRoot)
     {
-        if (!content.isOpaque() || !root.getLocalBounds().contains(bodyInRoot))
-            return {};
+        const auto reject = [] (const char* reason, const Component& blocker)
+        {
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            static uint32 lastEpoch = 0;
+            if (measuring && lastEpoch != measurementEpoch)
+            {
+                lastEpoch = measurementEpoch;
+                const auto bounds = blocker.getBounds();
+                __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                    "TIMELINE_COVERAGE_BLOCK reason=%s type=%s bounds=%d,%d,%d,%d "
+                    "opaque=%d transformed=%d alpha=%.3f buffered=%d",
+                    reason, typeid(blocker).name(), bounds.getX(), bounds.getY(),
+                    bounds.getWidth(), bounds.getHeight(), blocker.isOpaque(),
+                    blocker.isTransformed(), blocker.getAlpha(),
+                    blocker.getCachedComponentImage() != nullptr);
+            }
+           #else
+            ignoreUnused(reason, blocker);
+           #endif
+            return Rectangle<int>{};
+        };
+
+        if (!content.isOpaque())
+            return reject("content-not-opaque", content);
+        if (!root.getLocalBounds().contains(bodyInRoot))
+            return reject("outside-root", root);
 
         RectangleList<int> available(bodyInRoot);
         for (auto* child = &content; child != &root; )
@@ -835,19 +859,29 @@ private:
             if (parent == nullptr || child->isTransformed() || child->getAlpha() != 1.0f
                 || child->getCachedComponentImage() != nullptr
                 || !root.getLocalArea(child, child->getLocalBounds()).contains(bodyInRoot))
-                return {};
+                return reject("ancestor-ineligible", *child);
 
             for (int index = parent->getIndexOfChildComponent(child) + 1;
                  index < parent->getNumChildComponents(); ++index)
             {
                 const auto* sibling = parent->getChildComponent(index);
-                if (sibling->isVisible())
-                {
-                    // A floating control may cover a few pixels of the
-                    // timeline. Keep its footprint in the stationary raster.
-                    const auto bounds = root.getLocalArea(sibling, sibling->getLocalBounds());
+                if (!sibling->isVisible())
+                    continue;
+
+                const auto localBounds = sibling->getLocalBounds();
+                auto bounds = root.getLocalArea(sibling, localBounds);
+                if (bounds.isEmpty() || !bounds.expanded(1).intersects(bodyInRoot))
+                    continue;
+
+                // Some overlays use a full-screen drag envelope. Only an
+                // explicit paint contract can narrow their occlusion.
+                if (const auto* coverage = dynamic_cast<const ApexAndroidOverlayPaintBounds*>(sibling))
+                    bounds = root.getLocalArea(sibling,
+                        coverage->getApexAndroidPaintBounds().getIntersection(localBounds));
+                if (!bounds.isEmpty())
                     available.subtract(bounds.expanded(1));
-                }
+                if (available.isEmpty())
+                    return reject("covered-by-sibling", *sibling);
             }
             child = parent;
         }

@@ -360,8 +360,34 @@ def add_waveform_column_fill(path: Path) -> None:
     path.write_text(contents, encoding="utf-8")
 
 
+def add_overlay_paint_bounds(path: Path) -> None:
+    contents = path.read_text(encoding="utf-8")
+    if "JUCE_APEX_ANDROID_OVERLAY_PAINT_BOUNDS" in contents:
+        return
+    contents = replace(contents, "namespace juce\n{\n", """\
+namespace juce
+{
+
+#if JUCE_ANDROID
+#define JUCE_APEX_ANDROID_OVERLAY_PAINT_BOUNDS 1
+
+// A component can have a hit-testing or drag envelope larger than its paint
+// footprint. This optional interface must cover all pixels of its subtree in
+// local coordinates, including shadows. Full local bounds remain the default.
+class ApexAndroidOverlayPaintBounds
+{
+public:
+    virtual ~ApexAndroidOverlayPaintBounds() = default;
+    virtual Rectangle<int> getApexAndroidPaintBounds() const = 0;
+};
+#endif
+""")
+    path.write_text(contents, encoding="utf-8")
+
+
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
+    add_overlay_paint_bounds(gui / "components/juce_Component.h")
     configure_component_paint_probe(gui)
     mark_horizontal_move_repaints(gui / "components/juce_Component.cpp")
     graphics = root / "modules/juce_graphics"

@@ -7,6 +7,9 @@
 namespace DAW {
 
 class BubbleTaskbar : public juce::Component
+#if JUCE_ANDROID && defined(JUCE_APEX_ANDROID_OVERLAY_PAINT_BOUNDS)
+                    , public juce::ApexAndroidOverlayPaintBounds
+#endif
 {
 public:
     static constexpr int kBubbleSize    = 56;
@@ -109,10 +112,21 @@ public:
         clampBubble();
     }
 
+#if JUCE_ANDROID && defined(JUCE_APEX_ANDROID_OVERLAY_PAINT_BOUNDS)
+    juce::Rectangle<int> getApexAndroidPaintBounds() const override
+    {
+        // Dragging needs the whole window. The closed taskbar only paints
+        // its orb and shadow. Keep full coverage for the open window list.
+        return panelOpen_ || getNumChildComponents() != 0
+            ? getLocalBounds() : bubblePaintBounds().getIntersection(getLocalBounds());
+    }
+#endif
+
     void paint(juce::Graphics& g) override
     {
         const auto bub = bubbleRect();
-        const bool orbDirty = g.clipRegionIntersects(bub.expanded(10.f).getSmallestIntegerContainer());
+        const auto orbBounds = bubblePaintBounds();
+        const bool orbDirty = g.clipRegionIntersects(orbBounds);
         if (!orbDirty && !panelOpen_)
             return;
 
@@ -120,6 +134,10 @@ public:
         const int mc = getMinimizedCount();
         if (orbDirty)
         {
+           #if JUCE_ANDROID
+            juce::Graphics::ScopedSaveState clipOrb(g);
+            g.reduceClipRegion(orbBounds);
+           #endif
             // ── Bubble orb ──────────────────────────────────────────────────
             g.setColour(juce::Colours::black.withAlpha(0.45f));
             g.fillEllipse(bub.translated(0.f, 5.f).expanded(2.f));
@@ -472,6 +490,11 @@ private:
     {
         bubbleX_ = juce::jlimit(0.f, (float)juce::jmax(0, getWidth()  - kBubbleSize), bubbleX_);
         bubbleY_ = juce::jlimit(0.f, (float)juce::jmax(0, getHeight() - kBubbleSize), bubbleY_);
+    }
+
+    juce::Rectangle<int> bubblePaintBounds() const
+    {
+        return bubbleRect().expanded(10.f).getSmallestIntegerContainer();
     }
 
     juce::Rectangle<float> bubbleRect() const
