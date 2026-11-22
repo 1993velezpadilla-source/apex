@@ -14,6 +14,7 @@ import subprocess
 import time
 
 PACKAGE = "com.xziel.apex.mobileportrait"
+DIRECT_RENDERERS = ("direct-canvas", "layered-canvas")
 PHASES = ("pan", "pinch", "unpinch", "idle", "reverse",
           "vertical-pan", "vertical-pinch", "vertical-unpinch")
 COLD_SCROLL_TRAVERSALS = (
@@ -31,6 +32,17 @@ COLD_SCROLL_PHASES = (
 def adb(*args: str, binary: bool = False):
     result = subprocess.run(["adb", *args], capture_output=True, timeout=30, check=True)
     return result.stdout if binary else result.stdout.decode("utf-8", errors="replace")
+
+
+def dump_logcat(*args: str) -> str:
+    # Retry a transient logcat transport failure. The focus and gesture
+    # checks still use the actual output and fail for an app that stops.
+    try:
+        return adb("logcat", "-d", *args)
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 255:
+            raise
+        return adb("logcat", "-d", *args)
 
 
 def validate_result(result: dict, scene: str, renderer: str,
@@ -51,7 +63,8 @@ def validate_result(result: dict, scene: str, renderer: str,
     if not result.get("hardware_canvas"):
         raise ValueError("Activity did not use the production accelerated Android Canvas")
     gpu = renderer == "gpu"
-    direct = renderer == "direct-canvas"
+    direct = renderer in DIRECT_RENDERERS
+    layered = renderer == "layered-canvas"
     if result.get("renderer_requested") != renderer:
         raise ValueError("The requested renderer was not selected")
     if bool(result.get("master_preview_suppressed")) != suppress_master_preview:
@@ -64,7 +77,7 @@ def validate_result(result: dict, scene: str, renderer: str,
         raise ValueError("Java retained timeline translation switch mismatch")
     if bool(result.get("legacy_full_tree_raster")) != legacy_full_tree_raster:
         raise ValueError("Java peer traversal comparison switch mismatch")
-    for phase in phases:
+    for phase in result["phases"]:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
         if phase["phase"] != "idle" and phase["inputWallMs"]["count"] < 2:
@@ -74,13 +87,20 @@ def validate_result(result: dict, scene: str, renderer: str,
             raise ValueError("Missing raster CPU versus wall-time profiling samples")
         if not gpu and phase["phase"] != "idle" and peer_count < 2:
             raise ValueError("No measured Android native window paints")
-        if phase["peerTiledFrames"] != (0 if renderer == "int-array" else peer_count):
+        if phase["peerTiledFrames"] != (0 if layered or renderer == "int-array" else peer_count):
             raise ValueError("The requested native presentation path was not used")
         if phase["peerDirectFrames"] != (peer_count if direct else 0):
             raise ValueError(f"{phase['phase']} did not stay on the requested renderer "
                              f"({phase['peerDirectFrames']}/{peer_count} direct frames)")
         if direct and (phase["peerScrollTileFrames"] or phase["peerRetainedScrollFrames"]):
             raise ValueError("The direct timeline used moving bitmaps")
+        if phase["peerLayeredFrames"] != (peer_count if layered else 0):
+            raise ValueError(f"{phase['phase']} did not stay on the native window layers")
+        if layered and any(phase.get(metric, 0) for metric in
+                           ("peerMeanPixels", "peerMeanUpdatedTilePixels", "peerMeanReusedTilePixels")):
+            raise ValueError(f"{phase['phase']} updated a software backing bitmap")
+        if layered and phase["peerRecordedLayers"] > peer_count * 3:
+            raise ValueError(f"{phase['phase']} recorded more than the three window layers")
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
         multi_raster = phase["peerMultiRasterFrames"]
@@ -100,7 +120,7 @@ def validate_result(result: dict, scene: str, renderer: str,
             if after["audioCallbacks"] <= before["audioCallbacks"]:
                 raise ValueError(f"Audio device callbacks did not advance during {phase['phase']}")
         for state in (before, after):
-            if state.get("framePacing") != (renderer in ("frame-paced", "direct-canvas")):
+            if state.get("framePacing") != (direct or renderer == "frame-paced"):
                 raise ValueError("The requested frame pacing policy did not become active")
             if state.get("tracksWindowBuffered") or state.get("timelineWindowBuffered"):
                 raise ValueError("The Android navigation comparison requires direct window painting")
@@ -232,7 +252,7 @@ def validate_cold_scroll(result: dict) -> None:
             for state in (before, after):
                 if any(state[key] != start[key] for key in ("scrollY", "pps", "laneHeight")):
                     raise ValueError(f"{phase['phase']} changed zoom or moved vertically")
-            if result["renderer_requested"] == "direct-canvas":
+            if result["renderer_requested"] in DIRECT_RENDERERS:
                 frames = phase["peerWallMs"]["count"]
                 if frames < 2 or phase["peerDirectFrames"] != frames:
                     raise ValueError(f"{phase['phase']} did not stay on the direct Canvas")
@@ -314,7 +334,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         variant = "legacy-split"
     if pan_replay != "normal":
         variant = pan_replay
-    if cold_scroll_replay and renderer != "direct-canvas":
+    if cold_scroll_replay and renderer not in DIRECT_RENDERERS:
         variant = "cold-scroll-prepared" if prepare_edges else "cold-scroll-baseline"
     name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
@@ -343,7 +363,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     result = None
     phases = {}
     while time.monotonic() < deadline:
-        log = adb("logcat", "-d", "-v", "raw", "APEX_UI_BENCH:I", "*:S")
+        log = dump_logcat("-v", "raw", "APEX_UI_BENCH:I", "*:S")
         if "READY " in log and ready is None:
             ready = time.monotonic()
         if ready is not None and not before:
@@ -362,7 +382,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         if result is not None:
             break
         time.sleep(0.5)
-    full_log = adb("logcat", "-d", "-v", "threadtime")
+    full_log = dump_logcat("-v", "threadtime")
     (output / f"{name}-logcat.txt").write_text(full_log)
     if retain_translated_timeline and scene == "empty" and repeat == 1:
         for line in [x for x in full_log.splitlines() if "TIMELINE_COVERAGE_BLOCK " in x][:8]:
@@ -460,29 +480,29 @@ def main() -> int:
     results = []
     failures = []
     try:
-        # Compare the shipped 9.9.6 renderer and the direct Canvas in the
-        # same APK. Alternate order and repeat the empty-project comparison.
+        # Replay the same gestures in 9.9.7 and the native window renderer
+        # using one APK. Alternate the order and repeat the empty project.
         scenes = (("empty", 1, False), ("clip", 1, True), ("playback", 1, False),
                   ("recording", 1, True), ("empty", 2, True), ("deep", 1, False))
-        for scene, repeat, direct_first in scenes:
-            for direct in (direct_first, not direct_first):
+        for scene, repeat, layered_first in scenes:
+            for layered in (layered_first, not layered_first):
                 cold = scene != "deep"
-                renderer = "direct-canvas" if direct else "frame-paced"
-                variant = renderer if direct else ("cold-scroll-prepared" if cold else "retained-scroll")
-                name = f"{scene}-{variant}-{repeat}"
+                renderer = "layered-canvas" if layered else "direct-canvas"
+                name = f"{scene}-{renderer}-{repeat}"
                 try:
                     result = run_case(args.output, renderer, scene, repeat,
-                                      reuse_horizontal_bitmaps=not direct,
                                       precise_arranger_damage=True,
-                                      retain_translated_timeline=not direct,
-                                      cold_scroll_replay=cold, prepare_edges=not direct)
+                                      cold_scroll_replay=cold, prepare_edges=False)
                     results.append(result)
                     print(f"Runtime gesture/surface checks passed: {name}", flush=True)
                 except Exception as error:
                     failures.append({"case": name, "error": str(error)})
-                    (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
-                    screenshot(args.output / f"{name}-failure.png")
                     print(f"Runtime check FAILED: {name}: {error}", flush=True)
+                    try:
+                        (args.output / f"{name}-logcat.txt").write_text(dump_logcat("-v", "threadtime"))
+                        screenshot(args.output / f"{name}-failure.png")
+                    except Exception as evidence_error:
+                        print(f"Runtime failure capture unavailable: {evidence_error}", flush=True)
     finally:
         (args.output / "runtime-results.json").write_text(json.dumps({
             "hardware": "CI x86_64 Android emulator; not Pixel Fold",
@@ -514,7 +534,7 @@ def main() -> int:
                   f"p95={phase['ui_interval_p95_ms']:.1f} ms, "
                   f"worst={phase['ui_interval_worst_ms']:.1f} ms, "
                   f"peer draw p95={phase['peerWallMs']['p95']:.2f} ms, "
-                  f"peer transfer p95={phase['peerTransferMs']['p95']:.2f} ms, "
+                  f"peer outside software raster p95={phase['peerTransferMs']['p95']:.2f} ms, "
                   f"repeated window rasters={phase['peerMultiRasterFrames']}, "
                   f"window draw p95={phase['windowDrawMs']['p95']:.2f} ms, "
                   f"GPU p95={phase['windowGpuMs']['p95']:.2f} ms, "
@@ -529,14 +549,18 @@ def main() -> int:
                  if r["scene"] == scene and r["repeat"] == repeat}
         if len(cases) != 2:
             continue
-        for baseline, direct in zip(cases["frame-paced"]["phases"], cases["direct-canvas"]["phases"]):
-            if baseline["phase"] not in ("pan", "revisit", "post-x-pan", "post-y-pan"):
+        for baseline, layered in zip(cases["direct-canvas"]["phases"], cases["layered-canvas"]["phases"]):
+            if baseline["phase"] not in ("pan", "revisit", "post-x-pan", "post-y-pan", "pinch", "vertical-pinch"):
                 continue
-            print(f"[DIRECT-CANVAS-A/B] {scene} repeat={repeat} {direct['phase']} "
-                  f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{direct['ui_interval_p95_ms']:.1f} ms "
-                  f"worst={baseline['ui_interval_worst_ms']:.1f}/{direct['ui_interval_worst_ms']:.1f} ms "
-                  f"peer CPU p95={baseline['peerCpuMs']['p95']:.1f}/{direct['peerCpuMs']['p95']:.1f} ms "
-                  f"software px/frame={baseline.get('peerMeanPixels', 0):,}/{direct.get('peerMeanPixels', 0):,}", flush=True)
+            print(f"[NATIVE-WINDOW-A/B] {scene} repeat={repeat} {layered['phase']} "
+                  f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{layered['ui_interval_p95_ms']:.1f} ms "
+                  f"worst={baseline['ui_interval_worst_ms']:.1f}/{layered['ui_interval_worst_ms']:.1f} ms "
+                  f"whole frame p95={baseline['windowTotalMs']['p95']:.1f}/{layered['windowTotalMs']['p95']:.1f} ms "
+                  f"deadlines missed={baseline['windowMissedDeadlines']}/{baseline['windowKnownDeadlines']}"
+                  f" → {layered['windowMissedDeadlines']}/{layered['windowKnownDeadlines']} "
+                  f"peer CPU p95={baseline['peerCpuMs']['p95']:.1f}/{layered['peerCpuMs']['p95']:.1f} ms "
+                  f"software px/frame={baseline.get('peerMeanPixels', 0):,}/{layered.get('peerMeanPixels', 0):,} "
+                  f"layers recorded={layered['peerRecordedLayers']}/{layered['peerLayeredFrames'] * 3}", flush=True)
     # This job validates gesture correctness, NOT 60fps presentation.
     # The x86_64 SwiftShader emulator reports Choreographer callback spacing,
     # not SurfaceFlinger-presented frame intervals. Report misses explicitly

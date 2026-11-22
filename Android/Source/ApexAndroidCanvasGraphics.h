@@ -150,7 +150,7 @@ public:
     };
 
     CanvasGraphics(JNIEnv* envToUse, jobject target, Rectangle<int> clip,
-                   float scale, Resources& resources)
+                   float scale, Resources& resources, Point<int> targetOrigin)
         : env(envToUse), canvas(target), native(resources)
     {
         if (!native.initialise(env))
@@ -160,9 +160,11 @@ public:
         }
 
         outerSave = env->CallIntMethod(canvas, DirectCanvas.save);
+        if (targetOrigin != Point<int>{})
+            env->CallVoidMethod(canvas, DirectCanvas.translate, (float) -targetOrigin.x, (float) -targetOrigin.y);
         clipRectangle(clip.toFloat(), DirectCanvas.clipRect);
         env->CallVoidMethod(canvas, DirectCanvas.scale, scale, scale);
-        state.transform = AffineTransform::scale(scale);
+        state.transform = AffineTransform::scale(scale).translated(-targetOrigin.toFloat());
     }
 
     ~CanvasGraphics() override
