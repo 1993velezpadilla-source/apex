@@ -4,6 +4,17 @@
 #include "ArrangementRulerCore.h"
 #include "../../../Source/DiagnosticsCore/TimelinePaintMetrics.h"
 
+#if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+ #include <charconv>
+namespace juce
+{
+    bool drawApexAndroidRulerNumerals(Graphics&, Span<const char>, Rectangle<int>);
+   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    void recordApexAndroidRulerLabel(int bar, bool atlas) noexcept;
+   #endif
+}
+#endif
+
 namespace ArrangementEditor
 {
     namespace Col
@@ -40,12 +51,28 @@ namespace ArrangementEditor
          *  Clamped to ruler local bounds. */
         constexpr int kRulerPlayheadHalfWidth = 6;
 
-        /** Song-time label "m:ss" for a given time in seconds. */
-        juce::String formatTimeSeconds(double seconds)
+        /** The ruler rounds to the nearest second for its m:ss label. */
+        int labelSeconds(double seconds)
         {
-            const int totalSecs = juce::jmax(0, (int) std::llround(seconds));
-            return juce::String::formatted("%d:%02d", totalSecs / 60, totalSecs % 60);
+            return juce::jmax(0, (int) std::llround(seconds));
         }
+
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        bool drawRulerDigits(juce::Graphics& g, juce::Rectangle<int> box,
+                             int number, int seconds = -1)
+        {
+            // Enough space for an int and the optional colon and seconds.
+            char digits[24];
+            auto* end = std::to_chars(digits, digits + sizeof(digits) - 3, number).ptr;
+            if (seconds >= 0)
+            {
+                *end++ = ':';
+                *end++ = (char) ('0' + seconds / 10);
+                *end++ = (char) ('0' + seconds % 10);
+            }
+            return juce::drawApexAndroidRulerNumerals(g, { digits, (size_t) (end - digits) }, box);
+        }
+       #endif
 
         juce::Rectangle<int> rulerPlayheadDirtyRect(
             int playheadX, int rulerWidth, int rulerHeight) noexcept
@@ -176,14 +203,32 @@ namespace ArrangementEditor
                 {
                     g.setColour(fromU32(Col::text));
                     g.setFont(barFont);
-                    g.drawText(juce::String(bar + 1), barLabel, juce::Justification::centredLeft);
+                    bool drawn = false;
+                   #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+                    drawn = drawRulerDigits(g, barLabel, bar + 1);
+                   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                    juce::recordApexAndroidRulerLabel(bar + 1, drawn);
+                   #endif
+                   #endif
+                    if (!drawn)
+                        g.drawText(juce::String(bar + 1), barLabel, juce::Justification::centredLeft);
                 }
                 const juce::Rectangle<int> secondsLabel(x + 2, 18, 44, 12);
                 if (drawSeconds && dirty.intersects(secondsLabel))
                 {
                     g.setColour(fromU32(Col::textDim));
                     g.setFont(secondsFont);
-                    g.drawText(formatTimeSeconds(barTime), secondsLabel, juce::Justification::centredLeft);
+                    const auto total = labelSeconds(barTime);
+                    bool drawn = false;
+                   #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+                    drawn = drawRulerDigits(g, secondsLabel, total / 60, total % 60);
+                   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                    juce::recordApexAndroidRulerLabel(0, drawn);
+                   #endif
+                   #endif
+                    if (!drawn)
+                        g.drawText(juce::String::formatted("%d:%02d", total / 60, total % 60),
+                                   secondsLabel, juce::Justification::centredLeft);
                 }
             }
 

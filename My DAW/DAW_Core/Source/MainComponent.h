@@ -115,7 +115,8 @@ public:
    #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
     enum class TimelineBenchmarkTransport { Stopped, Playing, Recording };
     bool prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
-                                            TimelineBenchmarkTransport mode, bool retainedViewport = false);
+                                            TimelineBenchmarkTransport mode, bool retainedViewport = false,
+                                            bool rulerReplay = false);
     bool startTimelineNavigationBenchmarkTransport(TimelineBenchmarkTransport mode);
     juce::var timelineNavigationBenchmarkState(bool finishPhase);
    #endif

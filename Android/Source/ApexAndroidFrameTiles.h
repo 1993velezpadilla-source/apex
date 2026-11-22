@@ -1355,6 +1355,7 @@ public:
         {
             begin = Clock::now();
             beginCpu = threadCpuNs();
+            rulerPaintStats.frameBars = 0;
         }
     }
 
@@ -1364,6 +1365,14 @@ public:
         {
             sample.wallNs = ns(Clock::now() - begin);
             sample.cpuNs = threadCpuNs() - beginCpu;
+            const auto newBars = rulerPaintStats.frameBars & ~rulerPaintStats.seenBars;
+            rulerPaintStats.seenBars |= newBars;
+            for (int i = 0; i < RulerPaintStats::count; ++i)
+                if ((newBars & (1 << i)) != 0)
+                {
+                    rulerPaintStats.firstWall[(size_t) i] = sample.wallNs;
+                    rulerPaintStats.firstCpu[(size_t) i] = sample.cpuNs;
+                }
             recordedFrames[frameCount++] = sample;
         }
     }
@@ -1447,7 +1456,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage,
     jboolean retainTranslation, jboolean legacyFullTreeRaster,
     jboolean slowPanReplay, jboolean legacyHorizontalFilter, jboolean prepareViewport,
-    jboolean directCanvas, jboolean optimizedCanvas)
+    jboolean directCanvas, jboolean optimizedCanvas, jboolean rulerNumerals)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
@@ -1462,6 +1471,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     juce::apexAndroidFrame::benchmarkViewportPreparation = prepareViewport == JNI_TRUE;
     juce::apexAndroidFrame::directTimelineCanvas = directCanvas == JNI_TRUE;
     juce::apexAndroidFrame::fastDirectCanvas = optimizedCanvas == JNI_TRUE;
+    juce::apexAndroidFrame::useRulerNumerals = rulerNumerals == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
@@ -1469,6 +1479,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
 {
     using namespace juce::apexAndroidFrame;
     measuring = finish != JNI_TRUE;
+    measureRulerPaint = measuring;
     bitmapSubmitProfiling = measuring;
     if (measuring)
     {
@@ -1476,6 +1487,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
         tileUploadSamples = 0;
         frameCount = 0;
         touchPanCadence = {};
+        rulerPaintStats = {};
         ++measurementEpoch;
         ComponentPaintProbe::reset();
         return nullptr;
@@ -1500,6 +1512,25 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
     auto result = env->NewLongArray(count);
     if (result != nullptr && count > 0)
         env->SetLongArrayRegion(result, 0, count, values.data());
+    return result;
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeRulerPaintStats(JNIEnv* env, jclass)
+{
+    using namespace juce::apexAndroidFrame;
+    const auto& stats = rulerPaintStats;
+    std::array<jlong, 4 + 2 * RulerPaintStats::count> values {
+        stats.seenBars, stats.labels, stats.atlasLabels, stats.atlasBuilds
+    };
+    for (int i = 0; i < RulerPaintStats::count; ++i)
+    {
+        values[(size_t) (4 + 2 * i)] = stats.firstWall[(size_t) i];
+        values[(size_t) (5 + 2 * i)] = stats.firstCpu[(size_t) i];
+    }
+    auto result = env->NewLongArray((jsize) values.size());
+    if (result != nullptr)
+        env->SetLongArrayRegion(result, 0, (jsize) values.size(), values.data());
     return result;
 }
 #endif

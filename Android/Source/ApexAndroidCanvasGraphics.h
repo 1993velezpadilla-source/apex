@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -28,8 +29,20 @@ namespace juce::apexAndroidFrame
     METHOD (drawLine, "drawLine", "(FFFFLandroid/graphics/Paint;)V") \
     METHOD (drawLines, "drawLines", "([FIILandroid/graphics/Paint;)V") \
     METHOD (drawPath, "drawPath", "(Landroid/graphics/Path;Landroid/graphics/Paint;)V") \
+    METHOD (drawBitmapRect, "drawBitmap", "(Landroid/graphics/Bitmap;Landroid/graphics/Rect;Landroid/graphics/RectF;Landroid/graphics/Paint;)V") \
     METHOD (drawBitmap, "drawBitmap", "(Landroid/graphics/Bitmap;Landroid/graphics/Matrix;Landroid/graphics/Paint;)V")
 DECLARE_JNI_CLASS_WITH_MIN_SDK (DirectCanvas, "android/graphics/Canvas", 26)
+#undef JNI_CLASS_MEMBERS
+
+#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
+    METHOD (set, "set", "(IIII)V")
+DECLARE_JNI_CLASS (DirectIntRect, "android/graphics/Rect")
+#undef JNI_CLASS_MEMBERS
+
+#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
+    METHOD (constructor, "<init>", "()V") \
+    METHOD (set, "set", "(FFFF)V")
+DECLARE_JNI_CLASS (DirectFloatRect, "android/graphics/RectF")
 #undef JNI_CLASS_MEMBERS
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
@@ -100,6 +113,22 @@ DECLARE_JNI_CLASS (DirectLinearGradient, "android/graphics/LinearGradient")
 DECLARE_JNI_CLASS (DirectRadialGradient, "android/graphics/RadialGradient")
 #undef JNI_CLASS_MEMBERS
 
+#if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+static bool useRulerNumerals = false;
+struct RulerPaintStats
+{
+    static constexpr int firstBar = 33;
+    static constexpr int count = 7;
+    int frameBars = 0, seenBars = 0;
+    jlong labels = 0, atlasLabels = 0, atlasBuilds = 0;
+    std::array<jlong, count> firstWall {}, firstCpu {};
+};
+static RulerPaintStats rulerPaintStats;
+static bool measureRulerPaint = false;
+#else
+static constexpr bool useRulerNumerals = true;
+#endif
+
 class CanvasGraphics final : public LowLevelGraphicsContext
 {
 public:
@@ -127,6 +156,17 @@ public:
             GlobalRef bitmap;
         };
 
+        struct RulerAtlas
+        {
+            struct Digit { Rectangle<int> source; float advance = 0; };
+            GlobalRef bitmap;
+            Font font { FontOptions{} };
+            Colour colour;
+            float scale = 0;
+            int height = 0;
+            std::array<Digit, 11> digits;
+        };
+
         bool initialise(JNIEnv* env)
         {
             if (ready)
@@ -135,6 +175,8 @@ public:
             imagePaint = GlobalRef(LocalRef<jobject>(env->NewObject(AndroidPaint, AndroidPaint.constructor, 2)));
             path = GlobalRef(LocalRef<jobject>(env->NewObject(DirectPath, DirectPath.constructor)));
             rect = GlobalRef(LocalRef<jobject>(env->NewObject(AndroidRect, AndroidRect.constructor, 0, 0, 0, 0)));
+            glyphDestination = GlobalRef(LocalRef<jobject>(
+                env->NewObject(DirectFloatRect, DirectFloatRect.constructor)));
             matrix = GlobalRef(LocalRef<jobject>(env->NewObject(AndroidMatrix, AndroidMatrix.constructor)));
             matrixValues = GlobalRef(LocalRef<jobject>(env->NewFloatArray(9)));
             lines = GlobalRef(LocalRef<jobject>(env->NewFloatArray(lineCapacity)));
@@ -147,7 +189,7 @@ public:
             strokeStyle = GlobalRef(LocalRef<jobject>(env->GetStaticObjectField(DirectPaintStyle, DirectPaintStyle.stroke)));
             LocalRef<jobject> src(env->GetStaticObjectField(DirectBlendMode, DirectBlendMode.src));
             srcBlend = GlobalRef(LocalRef<jobject>(env->NewObject(DirectSrcBlend, DirectSrcBlend.constructor, src.get())));
-            ready = brush.get() && imagePaint.get() && path.get() && rect.get() && matrix.get()
+            ready = brush.get() && imagePaint.get() && path.get() && rect.get() && glyphDestination.get() && matrix.get()
                  && matrixValues.get() && lines.get() && clockwise.get() && winding.get()
                  && evenOdd.get() && clamp.get() && srcBlend.get()
                  && fillStyle.get() && strokeStyle.get() && !env->ExceptionCheck();
@@ -156,10 +198,13 @@ public:
 
         static constexpr int lineCapacity = 2048;
         GlobalRef brush, imagePaint, path, rect, matrix, matrixValues, lines;
+        GlobalRef glyphDestination;
         GlobalRef clockwise, winding, evenOdd, clamp, srcBlend;
         GlobalRef fillStyle, strokeStyle;
         std::vector<Glyph> glyphs;
         std::vector<ColourGlyph> colourGlyphs;
+        std::array<RulerAtlas, 2> rulerAtlases;
+        size_t nextRulerAtlas = 0;
         bool ready = false;
         bool useNativeShapes = false;
     };
@@ -452,6 +497,48 @@ public:
     void setFont(const Font& font) override { state.font = font; }
     const Font& getFont() override { return state.font; }
 
+    bool drawRulerNumerals(Span<const char> text, Rectangle<int> area)
+    {
+        if (text.empty() || !state.fill.isColour() || !succeeded())
+            return false;
+        if (!clipRegionIntersects(area))
+            return true;
+
+        const auto* atlas = getRulerAtlas(area.getHeight());
+        if (atlas == nullptr)
+            return false;
+        float width = 0;
+        for (auto symbol : text)
+        {
+            const auto index = rulerDigitIndex(symbol);
+            if (index < 0)
+                return false;
+            width += atlas->digits[(size_t) index].advance;
+        }
+        if (width > static_cast<float>(area.getWidth()))
+            return false; // Let the general text path apply its ellipsis.
+
+        const auto paint = native.imagePaint.get();
+        env->CallVoidMethod(paint, AndroidPaint.setAlpha, 255);
+        env->CallVoidMethod(paint, DirectPaint.filterBitmap, JNI_TRUE);
+        float x = (float) area.getX();
+        const float y = (float) area.getY();
+        for (auto symbol : text)
+        {
+            const auto& digit = atlas->digits[(size_t) rulerDigitIndex(symbol)];
+            const auto s = digit.source;
+            env->CallVoidMethod(native.rect.get(), DirectIntRect.set,
+                                s.getX(), s.getY(), s.getRight(), s.getBottom());
+            env->CallVoidMethod(native.glyphDestination.get(), DirectFloatRect.set, x, y,
+                                x + (float) s.getWidth() / atlas->scale,
+                                y + (float) s.getHeight() / atlas->scale);
+            env->CallVoidMethod(canvas, DirectCanvas.drawBitmapRect, atlas->bitmap.get(),
+                                native.rect.get(), native.glyphDestination.get(), paint);
+            x += digit.advance;
+        }
+        return succeeded();
+    }
+
     void drawGlyphs(Span<const uint16_t> glyphs, Span<const Point<float>> positions,
                     const AffineTransform& transform) override
     {
@@ -504,6 +591,62 @@ public:
     uint64_t getFrameId() const override { return frameId; }
 
 private:
+    static int rulerDigitIndex(char symbol) noexcept
+    {
+        if (symbol == ':')
+            return 10;
+        return symbol >= '0' && symbol <= '9' ? symbol - '0' : -1;
+    }
+
+    const Resources::RulerAtlas* getRulerAtlas(int rowHeight)
+    {
+        const auto physicalScale = getPhysicalPixelScaleFactor();
+        if (!std::isfinite(physicalScale) || physicalScale <= 0.0f || rowHeight <= 0)
+            return nullptr;
+        const auto scale = jmin(8.0f, physicalScale);
+        const auto colour = state.fill.colour;
+        for (const auto& atlas : native.rulerAtlases)
+            if (atlas.bitmap.get() != nullptr && atlas.font == state.font
+                && atlas.colour == colour && atlas.scale == scale && atlas.height == rowHeight)
+                return &atlas;
+
+        // Ruler type size is fixed in screen coordinates. This one texture
+        // contains only the ten digits and colon, independent of song time.
+        Resources::RulerAtlas next;
+        next.font = state.font;
+        next.colour = colour;
+        next.scale = scale;
+        next.height = rowHeight;
+        const int width = (int) std::ceil((next.font.getHeight() + 4.0f) * scale);
+        const int height = (int) std::ceil((float) rowHeight * scale);
+        Image image(Image::ARGB, width * (int) next.digits.size(), height, true, SoftwareImageType());
+        Graphics raster(image);
+        raster.addTransform(AffineTransform::scale(scale));
+        raster.setFont(next.font);
+        raster.setColour(colour);
+        for (size_t i = 0; i < next.digits.size(); ++i)
+        {
+            const auto text = String::charToString(i == 10 ? ':' : (int) i + '0');
+            const auto advance = GlyphArrangement::getStringWidth(next.font, text);
+            const int x = (int) i * width;
+            next.digits[i] = { { x, 0, jlimit(1, width, (int) std::ceil((advance + 2.0f) * scale)),
+                                 height }, advance };
+            raster.drawText(text, Rectangle<float>((float) x / scale, 0.0f, (float) width / scale,
+                                                  (float) rowHeight), Justification::centredLeft, false);
+        }
+        const auto bitmap = createBitmap(image);
+        if (bitmap == nullptr)
+            return nullptr;
+        next.bitmap = GlobalRef(bitmap);
+        auto& slot = native.rulerAtlases[native.nextRulerAtlas++ % native.rulerAtlases.size()];
+        slot = std::move(next);
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (measureRulerPaint)
+            ++rulerPaintStats.atlasBuilds;
+       #endif
+        return &slot;
+    }
+
     struct State
     {
         AffineTransform transform;
@@ -854,4 +997,29 @@ private:
     const uint64_t frameId = nextFrame++;
     static inline uint64_t nextFrame = 1; // Compiled and used on the Android message thread.
 };
+}
+
+namespace juce
+{
+bool drawApexAndroidRulerNumerals(Graphics& graphics, Span<const char> text, Rectangle<int> area)
+{
+    if (apexAndroidFrame::useRulerNumerals)
+        if (auto* canvas = dynamic_cast<apexAndroidFrame::CanvasGraphics*>(&graphics.getInternalContext()))
+            return canvas->drawRulerNumerals(text, area);
+    return false;
+}
+
+#if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+void recordApexAndroidRulerLabel(int bar, bool atlas) noexcept
+{
+    using namespace apexAndroidFrame;
+    if (!measureRulerPaint)
+        return;
+    const int slot = bar - RulerPaintStats::firstBar;
+    if (slot >= 0 && slot < RulerPaintStats::count)
+        rulerPaintStats.frameBars |= 1 << slot;
+    ++rulerPaintStats.labels;
+    rulerPaintStats.atlasLabels += atlas;
+}
+#endif
 }

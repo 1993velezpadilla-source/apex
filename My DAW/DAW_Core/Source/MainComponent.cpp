@@ -9746,7 +9746,8 @@ void MainComponent::startPluginScanIfNeeded()
 
 #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
 bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
-                                                       TimelineBenchmarkTransport mode, bool retainedViewport)
+                                                       TimelineBenchmarkTransport mode, bool retainedViewport,
+                                                       bool rulerReplay)
 {
     // Benchmark mode only populates a disposable, empty session.
     if (!arrangement_ || !timelineViewport_ || !timelineWindow_ || !trackList_ || !trackListWindow_)
@@ -9843,6 +9844,17 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
     updateTimelineViewportContentBounds();
     if (deepZoom && arrangement_)
         arrangement_->getCore()->zoomTo({ 9'000.0, 240.0 }, {});
+    if (rulerReplay)
+    {
+        // At 120 BPM this puts bar 34 at the left and bar 37 at the
+        // right, idling at the same ruler scale in both A/B runs.
+        auto* core = arrangement_->getCore();
+        const auto width = static_cast<double>(timelineViewport_->getViewWidth());
+        const auto pps = width / (2.0 * 3.68);
+        core->zoomTo({ pps, static_cast<double>(core->getZoom().getTrackHeightPx()) }, {});
+        timelineViewport_->setViewPosition(juce::roundToInt(66.0 * pps) - 4, 0);
+        syncTimelineViewportPosition();
+    }
     TimelinePaintMetrics::reset();
     TimelinePaintMetrics::active.store(true, std::memory_order_relaxed);
     if (mode == TimelineBenchmarkTransport::Recording)
@@ -9896,6 +9908,7 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     auto* state = new juce::DynamicObject();
     state->setProperty("scrollX", timelineViewport_ ? timelineViewport_->getViewPositionX() : -1);
     state->setProperty("scrollY", timelineViewport_ ? timelineViewport_->getViewPositionY() : -1);
+    state->setProperty("viewWidth", timelineViewport_ ? timelineViewport_->getViewWidth() : 0);
     state->setProperty("timelineContentSeconds", lastTimelineContentLengthSeconds_);
     state->setProperty("timelineContentWidth", arrangement_ ? arrangement_->getWidth() : 0);
     state->setProperty("pps", arrangement_ ? arrangement_->getPixelsPerSecond() : 0.0);

@@ -34,6 +34,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private final String renderer;
     private final String panReplay;
     private final boolean slowPanReplay, coldScrollReplay, prepareEdges;
+    private final boolean leftRulerReplay, rulerAtlas;
     private final String[] phaseNames;
     private final float physicalScale;
     private final int left, top, width, height;
@@ -44,6 +45,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private final long[] inputCpu = new long[2048];
     private final long[] phaseStarts, phaseEnds;
     private final ArrayList<long[]> windowFrames = new ArrayList<>();
+    private final ArrayList<long[]> rulerPhases = new ArrayList<>();
     private final HandlerThread metricsThread = new HandlerThread("APEX UI benchmark metrics");
     private final Window.OnFrameMetricsAvailableListener frameListener = this::recordWindowFrame;
     private final JSONArray phases = new JSONArray();
@@ -58,8 +60,9 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                                                  boolean retainTranslatedTimeline, boolean legacyFullTreeRaster,
                                                  boolean slowPanReplay, boolean legacyHorizontalFilter,
                                                  boolean prepareViewport, boolean directCanvas,
-                                                 boolean optimizedCanvas);
+                                                 boolean optimizedCanvas, boolean rulerNumerals);
     private static native long[] nativeWindowDrawSamples(boolean finish);
+    private static native long[] nativeRulerPaintStats();
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
         activity = owner;
@@ -70,6 +73,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         slowPanReplay = !"normal".equals(panReplay);
         coldScrollReplay = owner.getIntent().getBooleanExtra("apex_cold_scroll_replay", false);
         prepareEdges = owner.getIntent().getBooleanExtra("apex_prepare_edges", true);
+        leftRulerReplay = "ruler-left".equals(owner.getIntent().getStringExtra("apex_scene"));
+        rulerAtlas = owner.getIntent().getBooleanExtra("apex_ruler_atlas", false);
         phaseNames = coldScrollReplay ? COLD_SCROLL_PHASES : PHASES;
         phaseStarts = new long[phaseNames.length];
         phaseEnds = new long[phaseNames.length];
@@ -100,7 +105,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             activity.getIntent().getBooleanExtra("apex_retain_translated_timeline", false),
             activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false),
             slowPanReplay, "threshold-filter".equals(panReplay), prepareEdges,
-            directCanvas, optimizedCanvas);
+            directCanvas, optimizedCanvas, rulerAtlas);
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
@@ -181,11 +186,12 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             coordinates[0].y = coordinates[1].y = (float)(top + height * 0.5);
         } else {
             final boolean returning = "reverse".equals(name) || name.endsWith("return");
+            final int direction = (returning ? 1 : -1) * (leftRulerReplay ? -1 : 1);
             // Finish the swipe before lifting. A stationary tail makes the
             // revisit's start/end match the first traversal despite flings.
             final double travel = coldScrollReplay ? Math.min(1.0, progress / 0.78) : progress;
-            coordinates[0].x = panCoordinate(left + width * (returning ? 0.22 : 0.82),
-                width * 0.55, returning ? 1 : -1, travel);
+            coordinates[0].x = panCoordinate(left + width * (direction > 0 ? 0.22 : 0.82),
+                width * 0.55, direction, travel);
             coordinates[0].y = top + height * 0.82f;
         }
     }
@@ -238,6 +244,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 JSONObject entry = phases.getJSONObject(phase);
                 entry.put("after", state(true));
                 addPeerTimings(entry, nativeWindowDrawSamples(true));
+                rulerPhases.add(nativeRulerPaintStats());
                 entry.put("ui_callback_samples", samples);
                 entry.put("ui_interval_p50_ms", percentile(sorted, 0.50));
                 entry.put("ui_interval_p95_ms", percentile(sorted, 0.95));
@@ -298,12 +305,28 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                     windowMetrics.put("windowGpuMs", summarize(gpu, gpuCount));
                     windowMetrics.put("windowKnownDeadlines", knownDeadlines);
                     windowMetrics.put("windowMissedDeadlines", missedDeadlines);
+                    final long[] labels = rulerPhases.get(i);
+                    JSONObject ruler = new JSONObject();
+                    ruler.put("seen", labels[0]);
+                    ruler.put("labels", labels[1]);
+                    ruler.put("atlas", labels[2]);
+                    ruler.put("builds", labels[3]);
+                    JSONArray first = new JSONArray();
+                    for (int bar = 0; bar < 7; ++bar) {
+                        JSONArray sample = new JSONArray();
+                        sample.put(labels[4 + bar * 2] / 1.0e6);
+                        sample.put(labels[5 + bar * 2] / 1.0e6);
+                        first.put(sample);
+                    }
+                    ruler.put("first_ms", first);
+                    windowMetrics.put("ruler", ruler);
                     Log.i(TAG, "PHASE " + entry);
                     Log.i(TAG, "WINDOW " + windowMetrics);
                 }
             }
             JSONObject result = new JSONObject();
             result.put("renderer_requested", renderer);
+            result.put("ruler_atlas", rulerAtlas);
             result.put("hardware_canvas", decor.isHardwareAccelerated());
             result.put("scene", activity.getIntent().getStringExtra("apex_scene"));
             result.put("master_preview_suppressed",

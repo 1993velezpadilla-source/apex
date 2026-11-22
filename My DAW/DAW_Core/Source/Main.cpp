@@ -1973,10 +1973,12 @@ public:
             using BenchmarkTransport = MainComponent::TimelineBenchmarkTransport;
             const auto mode = scene == "recording" ? BenchmarkTransport::Recording
                 : scene == "playback" ? BenchmarkTransport::Playing : BenchmarkTransport::Stopped;
-            const bool benchmark = (scene == "empty" || scene == "clip" || scene == "deep"
+            const bool rulerReplay = scene == "ruler" || scene == "ruler-left";
+            const bool benchmark = (scene == "empty" || rulerReplay || scene == "clip" || scene == "deep"
                                     || mode != BenchmarkTransport::Stopped)
-                && daw->prepareTimelineNavigationBenchmark(scene != "empty", scene == "deep",
-                    renderer == "reference", mode, renderer == "retained" || renderer == "frame-paced");
+                && daw->prepareTimelineNavigationBenchmark(scene != "empty" && !rulerReplay, scene == "deep",
+                    renderer == "reference", mode, renderer == "retained" || renderer == "frame-paced",
+                    rulerReplay);
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);

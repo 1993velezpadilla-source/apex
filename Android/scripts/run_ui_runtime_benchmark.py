@@ -15,6 +15,7 @@ import time
 
 PACKAGE = "com.xziel.apex.mobileportrait"
 DIRECT_RENDERERS = ("direct-canvas", "optimized-canvas")
+RULER_SCENES = ("ruler", "ruler-left")
 PHASES = ("pan", "pinch", "unpinch", "idle", "reverse",
           "vertical-pan", "vertical-pinch", "vertical-unpinch")
 COLD_SCROLL_TRAVERSALS = (
@@ -133,7 +134,7 @@ def validate_result(result: dict, scene: str, renderer: str,
                 raise ValueError("Android arranger still uses a short/chunked 30-second timeline")
             if state.get("timelineContentWidth", 0) < state["pps"] * 600.0 - 1.0:
                 raise ValueError("Android arranged content width does not cover the reserved runway")
-            if (state.get("clips", 0) > 0) != (scene != "empty"):
+            if (state.get("clips", 0) > 0) != (scene not in ("empty", *RULER_SCENES)):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
             if state.get("backend") != ("OpenGL" if gpu else "software"):
                 raise ValueError("The requested arranger backend did not become active")
@@ -215,7 +216,7 @@ def validate_result(result: dict, scene: str, renderer: str,
             raise ValueError("Pinches did not reach both new zoom limits")
         if phases[2]["after"]["pps"] <= 4_000:
             raise ValueError("Pinch out did not remain in the expanded horizontal range")
-    if scene != "empty":
+    if scene not in ("empty", *RULER_SCENES):
         for phase in phases[:3]:
             if phase["after"].get("waveformPaints", 0) <= phase["before"].get("waveformPaints", 0):
                 raise ValueError(f"No production waveform draw observed during {phase['phase']}")
@@ -234,13 +235,14 @@ def validate_result(result: dict, scene: str, renderer: str,
 def validate_cold_scroll(result: dict) -> None:
     measured = {p["phase"]: p for p in result["phases"]}
     preparation = result["prepare_edges"]
+    direction = -1 if result["scene"] == "ruler-left" else 1
     for first_name, return_name, revisit_name, zoom_name in COLD_SCROLL_TRAVERSALS:
         first, returned, revisit = (measured[name] for name in
                                     (first_name, return_name, revisit_name))
         start, end = first["before"], first["after"]
-        if end["scrollX"] - start["scrollX"] < 50:
+        if direction * (end["scrollX"] - start["scrollX"]) < 50:
             raise ValueError(f"{first_name} did not travel through a new part of the arranger")
-        if returned["after"]["scrollX"] >= returned["before"]["scrollX"]:
+        if direction * (returned["after"]["scrollX"] - returned["before"]["scrollX"]) >= 0:
             raise ValueError(f"{return_name} did not return along the horizontal timeline")
         for moment in ("before", "after"):
             a, b = first[moment], revisit[moment]
@@ -281,6 +283,27 @@ def validate_cold_scroll(result: dict) -> None:
                   f"{phase['peerCpuMs']['worst']:.1f}ms "
                   f"direct frames={phase['peerDirectFrames']}/{phase['peerWallMs']['count']} "
                   f"pixels prepared before first pass={prepared:,}", flush=True)
+
+
+def validate_ruler_reveals(result: dict, scene: str, use_atlas: bool) -> None:
+    phases = {p["phase"]: p for p in result["phases"]}
+    targets = (33,) if scene == "ruler-left" else (38, 39)
+    mask = sum(1 << (bar - 33) for bar in targets)
+    start = phases["pan"]["before"]
+    for bar in targets:
+        label_x = 2.0 * (bar - 1) * start["pps"] - start["scrollX"] + 2
+        if 0 <= label_x < start["viewWidth"]:
+            raise ValueError(f"Bar {bar} started inside the viewport")
+    for name in ("pan", "revisit", "post-x-pan", "post-y-pan"):
+        ruler = phases[name]["ruler"]
+        if name in ("pan", "revisit") and ruler["seen"] & mask != mask:
+            raise ValueError(f"{name} did not paint the requested bars {targets}: {ruler['seen']}")
+        if use_atlas and ruler["atlas"] <= 0:
+            raise ValueError(f"{name} drew no ruler labels from the fixed digits")
+        if not use_atlas and ruler["atlas"]:
+            raise ValueError(f"{name} used fixed digits in the original-renderer control")
+    if use_atlas and any(p["ruler"]["builds"] for p in result["phases"][1:]):
+        raise ValueError("Navigation or zoom rebuilt the ruler's digits")
 
 
 def validate_focus(window_dump: str) -> None:
@@ -324,7 +347,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
              retain_translated_timeline: bool = False,
              legacy_full_tree_raster: bool = False,
              pan_replay: str = "normal", cold_scroll_replay: bool = False,
-             prepare_edges: bool = True) -> dict:
+             prepare_edges: bool = True, ruler_atlas: bool = False) -> dict:
     # Only a disposable CI emulator may disable the master waveform.
     variant = "retained-scroll" if retain_translated_timeline else (
         "precise-damage" if precise_arranger_damage else (
@@ -337,7 +360,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         variant = renderer if pan_replay == "normal" else f"{renderer}-{pan_replay}"
     elif cold_scroll_replay:
         variant = "cold-scroll-prepared" if prepare_edges else "cold-scroll-baseline"
-    name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
+    suffix = "-atlas" if ruler_atlas else ""
+    name = f"{scene}-{variant}{suffix}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
     adb("shell", "pm", "grant", PACKAGE, "android.permission.RECORD_AUDIO")
@@ -356,7 +380,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         "true" if legacy_full_tree_raster else "false",
         "--es", "apex_pan_replay", pan_replay,
         "--ez", "apex_cold_scroll_replay", str(cold_scroll_replay).lower(),
-        "--ez", "apex_prepare_edges", str(prepare_edges).lower())
+        "--ez", "apex_prepare_edges", str(prepare_edges).lower(),
+        "--ez", "apex_ruler_atlas", str(ruler_atlas).lower())
     deadline = time.monotonic() + 100
     ready = None
     before = False
@@ -435,7 +460,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     result["phases"] = [dict(phases[key], **windows[key]) for key in expected]
     if (result.get("pan_replay") != pan_replay
             or result.get("cold_scroll_replay") != cold_scroll_replay
-            or result.get("prepare_edges") != prepare_edges):
+            or result.get("prepare_edges") != prepare_edges
+            or result.get("ruler_atlas") != ruler_atlas):
         raise ValueError(f"{name}: wrong pan replay configuration")
     if pan_replay != "normal":
         cadence = re.findall(r"PAN_CADENCE x=(\d+),(\d+),(\d+) y=(\d+),(\d+),(\d+)", full_log)
@@ -455,6 +481,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
                     legacy_full_tree_raster)
     if cold_scroll_replay:
         validate_cold_scroll(result)
+    if scene in RULER_SCENES:
+        validate_ruler_reveals(result, scene, ruler_atlas)
     first = (output / f"{name}-before.png").read_bytes()
     last = (output / f"{name}-after.png").read_bytes()
     if hashlib.sha256(first).digest() == hashlib.sha256(last).digest():
@@ -487,19 +515,19 @@ def main() -> int:
     results = []
     failures = []
     try:
-        # Replay the same gestures in 9.9.7 and the optimized Canvas
-        # using one APK. Alternate the order and repeat the empty project.
-        scenes = (("empty", 1, False), ("clip", 1, True), ("playback", 1, False),
-                  ("recording", 1, True), ("empty", 2, True), ("deep", 1, False))
-        for scene, repeat, optimized_first in scenes:
-            for optimized in (optimized_first, not optimized_first):
+        # Isolate the ruler change: both variants use exactly the 9.9.9
+        # compositor. Start at the reported bars with and without the atlas.
+        scenes = (("ruler", 1, False), ("clip", 1, True), ("playback", 1, False),
+                  ("recording", 1, True), ("ruler-left", 1, True), ("deep", 1, False))
+        for scene, repeat, atlas_first in scenes:
+            for atlas in (atlas_first, not atlas_first):
                 cold = scene != "deep"
-                renderer = "optimized-canvas" if optimized else "direct-canvas"
-                name = f"{scene}-{renderer}-{repeat}"
+                renderer = "optimized-canvas"
+                name = f"{scene}-{renderer}{'-atlas' if atlas else ''}-{repeat}"
                 try:
                     result = run_case(args.output, renderer, scene, repeat,
                                       precise_arranger_damage=True,
-                                      cold_scroll_replay=cold, prepare_edges=False)
+                                      cold_scroll_replay=cold, prepare_edges=False, ruler_atlas=atlas)
                     results.append(result)
                     print(f"Runtime gesture/surface checks passed: {name}", flush=True)
                 except Exception as error:
@@ -552,14 +580,14 @@ def main() -> int:
                   f"arranger pixels reused={reused:,}/redrawn={redrawn:,} "
                   f"cache pixels shifted={copied:,} rebases={rebased}")
     for scene, repeat, _ in scenes:
-        cases = {r["renderer_requested"]: r for r in results
+        cases = {r["ruler_atlas"]: r for r in results
                  if r["scene"] == scene and r["repeat"] == repeat}
         if len(cases) != 2:
             continue
-        for baseline, optimized in zip(cases["direct-canvas"]["phases"], cases["optimized-canvas"]["phases"]):
+        for baseline, optimized in zip(cases[False]["phases"], cases[True]["phases"]):
             if baseline["phase"] not in ("pan", "revisit", "post-x-pan", "post-y-pan", "pinch", "vertical-pinch"):
                 continue
-            print(f"[CANVAS-A/B] {scene} repeat={repeat} {optimized['phase']} "
+            print(f"[RULER-A/B] {scene} repeat={repeat} {optimized['phase']} "
                   f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{optimized['ui_interval_p95_ms']:.1f} ms "
                   f"worst={baseline['ui_interval_worst_ms']:.1f}/{optimized['ui_interval_worst_ms']:.1f} ms "
                   f"whole frame p95={baseline['windowTotalMs']['p95']:.1f}/{optimized['windowTotalMs']['p95']:.1f} ms "
@@ -567,7 +595,15 @@ def main() -> int:
                   f" → {optimized['windowMissedDeadlines']}/{optimized['windowKnownDeadlines']} "
                   f"peer CPU p95={baseline['peerCpuMs']['p95']:.1f}/{optimized['peerCpuMs']['p95']:.1f} ms "
                   f"software px/frame={baseline.get('peerMeanPixels', 0):,}/{optimized.get('peerMeanPixels', 0):,} "
-                  f"unchanged chrome px/frame={optimized.get('peerMeanSkippedChromePixels', 0):,}", flush=True)
+                  f"label draws={optimized['ruler']['atlas']}/{optimized['ruler']['labels']} "
+                  f"digit atlas builds={optimized['ruler']['builds']}", flush=True)
+            if scene in RULER_SCENES:
+                for bar in ((33,) if scene == "ruler-left" else (38, 39)):
+                    old_ms, new_ms = (p["ruler"]["first_ms"][bar - 33] for p in (baseline, optimized))
+                    if old_ms[0] and new_ms[0]:
+                        print(f"[RULER-REVEAL] bar={bar} phase={optimized['phase']} "
+                              f"peer wall={old_ms[0]:.2f}/{new_ms[0]:.2f} ms "
+                              f"CPU={old_ms[1]:.2f}/{new_ms[1]:.2f} ms", flush=True)
     # This job validates gesture correctness, NOT 60fps presentation.
     # The x86_64 SwiftShader emulator reports Choreographer callback spacing,
     # not SurfaceFlinger-presented frame intervals. Report misses explicitly
