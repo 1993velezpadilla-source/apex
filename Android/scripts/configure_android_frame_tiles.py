@@ -385,6 +385,34 @@ public:
     path.write_text(contents, encoding="utf-8")
 
 
+def align_retained_timeline_origin(component: Path, software_renderer: Path) -> None:
+    contents = component.read_text(encoding="utf-8")
+    if "apexAndroidFrame::applyTimelineRasterOrigin" not in contents:
+        contents = replace(contents, "    g.setOrigin (getPosition());", """\
+    g.setOrigin (getPosition());
+   #if JUCE_ANDROID
+    apexAndroidFrame::applyTimelineRasterOrigin (*this, g);
+   #endif""")
+        component.write_text(contents, encoding="utf-8")
+
+    contents = software_renderer.read_text(encoding="utf-8")
+    if "setApexDeviceRasterOriginX" not in contents:
+        contents = replace(contents, "    // Return the actual raster damage in local device pixels.", """\
+    // Set only the viewed component's X origin while rasterizing the retained
+    // body. The current device-space clip and vertical transform stay intact.
+    void setApexDeviceRasterOriginX (int x) noexcept
+    {
+        jassert (! stack->transform.isRotated);
+        if (stack->transform.isOnlyTranslated)
+            stack->transform.offset.x = x;
+        else
+            stack->transform.complexTransform.mat02 = (float) x;
+    }
+
+    // Return the actual raster damage in local device pixels.""")
+        software_renderer.write_text(contents, encoding="utf-8")
+
+
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
     add_overlay_paint_bounds(gui / "components/juce_Component.h")
@@ -397,6 +425,7 @@ def configure(root: Path) -> None:
     add_opaque_image_blit(software_renderer)
     add_device_clip_query(software_renderer)
     add_waveform_column_fill(software_renderer)
+    align_retained_timeline_origin(gui / "components/juce_Component.cpp", software_renderer)
     module = gui / "juce_gui_basics.cpp"
     peer = gui / "native/juce_Windowing_android.cpp"
     source = Path(__file__).resolve().parents[1] / "Source/ApexAndroidFrameTiles.h"

@@ -100,9 +100,11 @@ def validate_result(result: dict, scene: str, renderer: str,
     retained = sum(phase["peerRetainedScrollFrames"] for phase in phases)
     if not retain_translated_timeline and retained:
         raise ValueError("Control case unexpectedly skipped the timeline body raster")
-    if retain_translated_timeline and scene == "empty" and not any(
-            phases[i]["peerRetainedScrollFrames"] for i in (0, 4)):
-        raise ValueError("Empty timeline did not exercise damage-only horizontal translation")
+    if retain_translated_timeline and scene != "deep":
+        for i in (0, 4):
+            if not phases[i]["peerRetainedScrollFrames"]:
+                raise ValueError(
+                    f"{scene} {phases[i]['phase']} reused no precomposited timeline pixels")
     if scene == "recording":
         # The old 30-second extent trapped REC pans near bar 15 even while
         # the audio callback continued to write new samples. The benchmark

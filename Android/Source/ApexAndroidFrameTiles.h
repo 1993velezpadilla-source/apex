@@ -74,6 +74,22 @@ static constexpr bool reduceTimelineMotion = false;
 // Normal invalidation still travels through JUCE's component caches.
 static thread_local const Component* horizontalMoveRepaintSource = nullptr;
 
+struct TimelineRasterOrigin
+{
+    const Component* content = nullptr;
+    int deviceX = 0;
+};
+
+static thread_local TimelineRasterOrigin timelineRasterOrigin;
+
+static void applyTimelineRasterOrigin(const Component& component, Graphics& graphics)
+{
+    if (timelineRasterOrigin.content != &component)
+        return;
+    if (auto* renderer = dynamic_cast<LowLevelGraphicsSoftwareRenderer*>(&graphics.getInternalContext()))
+        renderer->setApexDeviceRasterOriginX(timelineRasterOrigin.deviceX);
+}
+
 struct HorizontalMoveDamage
 {
     void add(Rectangle<int> area, int originX)
@@ -273,11 +289,11 @@ public:
         const auto delta = snapDeviceX(scroll.contentOrigin.x, scale)
                          - snapDeviceX(lastScroll.contentOrigin.x, scale);
         const bool scrolled = !scroll.area.isEmpty() && delta != 0;
-        // Only translate a composited body when its screen coverage, Y and
-        // subpixel phase have stayed the same. Other moves reconcile it
-        // using the complete raster and shadow comparison.
-        const auto exactDelta = (static_cast<double>(scroll.contentOrigin.x)
-                                  - lastScroll.contentOrigin.x) * scale;
+        // Timeline pixels in this layer use the same device-pixel origin
+        // as the bitmap ring. A fractional motion in JUCE coordinates can
+        // therefore translate the raster by the exact integer device delta.
+        if (scroll.unobstructed != lastScroll.unobstructed || scroll.content != lastScroll.content)
+            redraw.add(scroll.area);
         const auto [firstX, lastX] = std::minmax(lastScroll.contentOrigin.x, scroll.contentOrigin.x);
         const bool canTranslate = !reset && !moves.regions.isEmpty()
             && scroll.unobstructed && lastScroll.unobstructed
@@ -286,8 +302,7 @@ public:
             // Pixels temporarily offscreen may have changed without a peer
             // repaint. Keep the full raster after an overshoot or round-trip.
             && moves.minX == firstX && moves.maxX == lastX
-            && std::abs(delta) < scroll.area.getWidth()
-            && std::abs(exactDelta - static_cast<double>(delta)) < 0.0001;
+            && std::abs(delta) < scroll.area.getWidth();
        #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         if (retainTranslatedTimeline && measuring && scrolled && !moves.regions.isEmpty())
         {
@@ -297,13 +312,18 @@ public:
                 scrollProbeSamples = 0;
             }
             if (scrollProbeSamples++ < 6)
+            {
+                const auto logicalDelta = static_cast<double>(scroll.contentOrigin.x)
+                                        - lastScroll.contentOrigin.x;
                 __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
                     "TRANSLATED_TIMELINE eligible=%d unobstructed=%d/%d reset=%d "
-                    "dx=%.5f origin=%d/%d range=%d/%d body=%d,%d,%d,%d",
+                    "dx=%.5f aligned_dx=%lld origin=%d/%d range=%d/%d body=%d,%d,%d,%d",
                     canTranslate, lastScroll.unobstructed, scroll.unobstructed, reset,
-                    exactDelta, lastScroll.contentOrigin.x, scroll.contentOrigin.x,
+                    logicalDelta * scale, static_cast<long long>(delta),
+                    lastScroll.contentOrigin.x, scroll.contentOrigin.x,
                     moves.minX, moves.maxX, scroll.area.getX(), scroll.area.getY(),
                     scroll.area.getWidth(), scroll.area.getHeight());
+            }
         }
        #endif
         if (canTranslate)
@@ -799,7 +819,31 @@ public:
                 return false;
             redraw.subtract(motionArea);
         }
-        if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), raster, scroll, moves))
+        const auto rasterTimeline = [&] (const Image& frame, const RectangleList<int>& regions,
+                                         Point<int> origin, int divisor)
+        {
+            const auto retainedArea = scroll.area - origin;
+            if (!scroll.unobstructed || !regions.intersectsRectangle(retainedArea))
+            {
+                raster(frame, regions, origin, divisor);
+                return;
+            }
+
+            // Keep the ruler, controls and any occluded part in screen
+            // coordinates. Only the moving body uses the ring's pixel origin.
+            auto stationary = regions;
+            stationary.subtract(retainedArea);
+            if (!stationary.isEmpty())
+                raster(frame, stationary, origin, divisor);
+
+            auto body = regions;
+            body.clipTo(retainedArea);
+            const TimelineRasterOrigin aligned { scroll.content,
+                static_cast<int>(snapDeviceX(scroll.contentOrigin.x, scale) - origin.x) };
+            const ScopedValueSetter<TimelineRasterOrigin> useAlignedOrigin(timelineRasterOrigin, aligned);
+            raster(frame, body, origin, divisor);
+        };
+        if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), rasterTimeline, scroll, moves))
             return false;
 
         damage->hardwareCanvas = framePacingEnabled && hardwareCanvas;
