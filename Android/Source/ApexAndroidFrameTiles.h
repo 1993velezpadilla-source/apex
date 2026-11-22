@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ApexAndroidCanvasGraphics.h"
 #include <android/bitmap.h>
 #include <array>
 #include <chrono>
@@ -54,6 +55,7 @@ static bool framePacingEnabled = true;
 static bool horizontalBitmapReuse = false;
 static bool preciseArrangerDamage = false;
 static bool retainTranslatedTimeline = false;
+static bool directTimelineCanvas = false;
 static bool benchmarkLegacyFullTreeRaster = false;
 static bool benchmarkSlowPanReplay = false;
 static bool benchmarkLegacyHorizontalFilter = false;
@@ -63,8 +65,13 @@ static bool benchmarkSuppressMasterPreview = false;
 #else
 static constexpr bool framePacingEnabled = true;
 static constexpr bool preciseArrangerDamage = true;
+   #if defined(APEX_ANDROID_DIRECT_TIMELINE) && APEX_ANDROID_DIRECT_TIMELINE
+    static constexpr bool directTimelineCanvas = true;
+   #else
+    static constexpr bool directTimelineCanvas = false;
+   #endif
    #if defined(APEX_ANDROID_HORIZONTAL_REUSE_PREVIEW) && APEX_ANDROID_HORIZONTAL_REUSE_PREVIEW
-    static constexpr bool horizontalBitmapReuse = true;
+    static constexpr bool horizontalBitmapReuse = !directTimelineCanvas;
    #else
     static constexpr bool horizontalBitmapReuse = false;
    #endif
@@ -818,11 +825,12 @@ public:
         nativeTiles.invalidate();
         motionTiles.invalidate();
         drawnMotionArea = {};
+        drawnDirectArea = {};
     }
 
-    template <typename Raster>
+    template <typename Raster, typename PaintCanvas>
     bool paint(JNIEnv* env, jobject canvas, Rectangle<int> clip, float scale,
-               Component& root, Raster&& raster)
+               Component& root, Raster&& raster, PaintCanvas&& paintCanvas)
     {
         const bool opaque = root.isOpaque();
 
@@ -843,7 +851,7 @@ public:
         if (!surface.intersects(clip))
             return false;
         const bool hardwareCanvas = env->CallBooleanMethod(canvas, TileCanvas.isHardwareAccelerated) == JNI_TRUE;
-        const auto scroll = hardwareCanvas && opaque && !reduceTimelineMotion
+        const auto scroll = hardwareCanvas && opaque && !reduceTimelineMotion && !directTimelineCanvas
             ? timelineScroll(root, surface, scale) : HorizontalTileScroll{};
         const bool initialOrResized = nativeTiles.needsReset(surface, scale, opaque, scroll.area);
        #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
@@ -868,6 +876,26 @@ public:
        #endif
         if (initialOrResized)
             redraw.add(surface);
+
+        // The direct layer is the same on-screen rectangle at every world X.
+        // Let the real component tree render into the hardware Canvas. Paint
+        // the software chrome around it, outside the same rectangle.
+        const auto candidate = hardwareCanvas && opaque && directTimelineCanvas
+            ? directTimelineArea(root, surface, scale).getIntersection(clip) : Rectangle<int>{};
+        auto directArea = candidate;
+        if (!candidate.isEmpty() && !paintCanvas(canvasResources, candidate))
+        {
+            // A complex overlay may request an unsupported operation. The
+            // opaque software draw below overwrites the incomplete recording
+            // in full for this frame. Its backing is fixed in screen space.
+            redraw.add(candidate);
+            directArea = {};
+        }
+        if (directArea != drawnDirectArea)
+            redraw.add(drawnDirectArea);
+        if (!directArea.isEmpty())
+            redraw.subtract(directArea);
+
         if (motionArea != drawnMotionArea)
         {
             redraw.add(drawnMotionArea);
@@ -918,7 +946,18 @@ public:
             return false;
 
         damage->hardwareCanvas = framePacingEnabled && hardwareCanvas;
-        nativeTiles.draw(env, canvas, clip, motionArea);
+        if (!directArea.isEmpty())
+        {
+            const auto save = env->CallIntMethod(canvas, DirectCanvas.save);
+            const auto r = directArea.toFloat();
+            env->CallBooleanMethod(canvas, DirectCanvas.clipOutRect, r.getX(), r.getY(),
+                                   r.getRight(), r.getBottom());
+            nativeTiles.draw(env, canvas, clip, directArea);
+            env->CallVoidMethod(canvas, DirectCanvas.restore, save);
+        }
+        else
+            nativeTiles.draw(env, canvas, clip, motionArea);
+        drawnDirectArea = directArea;
         if (!motionArea.isEmpty())
             motionTiles.draw(env, canvas, clip);
         drawnMotionArea = motionArea;
@@ -926,6 +965,7 @@ public:
     }
 
     bool drawsMotionLayer() const noexcept { return !drawnMotionArea.isEmpty(); }
+    bool drawsDirectTimeline() const noexcept { return !drawnDirectArea.isEmpty(); }
    #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
     int getUpdatedTilePixels() const noexcept
     {
@@ -937,6 +977,22 @@ public:
    #endif
 
 private:
+    Rectangle<int> directTimelineArea(const Component& root, Rectangle<int> surface,
+                                      float scale) const
+    {
+        const auto* viewport = horizontalViewport.getComponent();
+        if (viewport == nullptr || !viewport->isShowing() || !root.isParentOf(viewport)
+            || !std::isfinite(scale) || scale <= 0.0f)
+            return {};
+        const auto* content = viewport->getViewedComponent();
+        if (content == nullptr || !content->isShowing())
+            return {};
+        const auto bounds = viewport->getLocalBounds().withWidth(viewport->getViewWidth())
+            .withHeight(viewport->getViewHeight());
+        return (root.getLocalArea(viewport, bounds).toDouble() * static_cast<double>(scale))
+            .getSmallestIntegerContainer().getIntersection(surface);
+    }
+
     static Rectangle<int> unobstructedTimelineBody(const Component& root, const Component& content,
                                                     Rectangle<int> bodyInRoot)
     {
@@ -1057,7 +1113,8 @@ private:
     Component::SafePointer<Viewport> horizontalViewport;
     int timelineHeaderHeight = 0;
     uint32 lastMotionMs = 0;
-    Rectangle<int> drawnMotionArea;
+    Rectangle<int> drawnMotionArea, drawnDirectArea;
+    CanvasGraphics::Resources canvasResources;
 };
 
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
@@ -1267,7 +1324,8 @@ public:
     {
         if (record)
         {
-            sample.usedTiles = tiles.drawsMotionLayer() ? 2 : (tiles.drawsScrollTiles() ? 3 : 1);
+            sample.usedTiles = tiles.drawsDirectTimeline() ? 4
+                : (tiles.drawsMotionLayer() ? 2 : (tiles.drawsScrollTiles() ? 3 : 1));
             sample.updatedTilePixels = tiles.getUpdatedTilePixels();
             sample.reusedTilePixels = tiles.getReusedTilePixels();
             sample.retainedScrollPixels = tiles.getRetainedScrollPixels();
@@ -1320,7 +1378,8 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced,
     jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage,
     jboolean retainTranslation, jboolean legacyFullTreeRaster,
-    jboolean slowPanReplay, jboolean legacyHorizontalFilter, jboolean prepareViewport)
+    jboolean slowPanReplay, jboolean legacyHorizontalFilter, jboolean prepareViewport,
+    jboolean directCanvas)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
@@ -1333,6 +1392,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     juce::apexAndroidFrame::benchmarkSlowPanReplay = slowPanReplay == JNI_TRUE;
     juce::apexAndroidFrame::benchmarkLegacyHorizontalFilter = legacyHorizontalFilter == JNI_TRUE;
     juce::apexAndroidFrame::benchmarkViewportPreparation = prepareViewport == JNI_TRUE;
+    juce::apexAndroidFrame::directTimelineCanvas = directCanvas == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL

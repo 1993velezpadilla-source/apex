@@ -12,6 +12,7 @@ on:
       - "Android/scripts/configure_android_frame_tiles.py"
       - "Android/scripts/pin_full_exporter_ndk.py"
       - "Android/Source/ApexAndroidFrameTiles.h"
+      - "Android/Source/ApexAndroidCanvasGraphics.h"
       - ".github/workflows/apex-android-full-shell-release.yml"
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"

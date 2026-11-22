@@ -648,7 +648,7 @@ namespace ArrangementEditor
         , m_ghostOverlay(*this)
     {
         setOpaque(true); // paint() fills the entire surface
-       #if JUCE_ANDROID
+       #if JUCE_ANDROID && (!defined(APEX_ANDROID_DIRECT_TIMELINE) || !APEX_ANDROID_DIRECT_TIMELINE)
         setViewportPaintCacheEnabled(true);
        #endif
         // Initialize timers for deferred clip work.
@@ -1466,15 +1466,11 @@ namespace ArrangementEditor
        #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
         if (onDisplayFrame && juce::isApexAndroidFramePacingEnabled())
             onDisplayFrame();
-        if (!m_touchNavigationArmed && !m_pendingZoom)
-        {
-           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-            if (!juce::isApexViewportPreparationEnabled())
-                return;
-           #endif
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (!m_touchNavigationArmed && !m_pendingZoom && juce::isApexViewportPreparationEnabled())
             if (auto* cache = dynamic_cast<ViewportPaintCache*>(getCachedComponentImage()))
                 cache->prepareOutsideViewport();
-        }
+       #endif
        #endif
     }
 

@@ -42,7 +42,7 @@ def main() -> int:
     # Compare OpenGL in the emulator while the device preview uses the measured Canvas path.
     gpu_arranger = args.benchmark_x86
     if frame_cache_preview:
-        name, app_id = "APEX Horizontal Scroll 9.9.6", "com.xziel.apex.framecache"
+        name, app_id = "APEX Mobile 9.9.7", "com.xziel.apex.framecache"
     elif zoom_preview:
         name, app_id = "APEX Zoom Rewrite 7.1", "com.xziel.apex.zoomrewrite"
     elif portrait_preview or args.benchmark_x86:
@@ -65,7 +65,7 @@ def main() -> int:
         "APEX_ENABLE_PLUGIN_SANDBOX=0",
         f"APEX_ANDROID_UI_BENCHMARK={int(args.benchmark_x86)}",
         f"APEX_ANDROID_GPU_ARRANGER={int(gpu_arranger)}",
-        f"APEX_ANDROID_HORIZONTAL_REUSE_PREVIEW={int(frame_cache_preview)}",
+        f"APEX_ANDROID_DIRECT_TIMELINE={int(not args.benchmark_x86)}",
     ])
     root.set("defines", " ".join(defines))
 

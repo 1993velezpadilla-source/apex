@@ -442,6 +442,31 @@ def align_retained_timeline_origin(component: Path, software_renderer: Path) -> 
     software_renderer.write_text(contents, encoding="utf-8")
 
 
+def add_direct_timeline_canvas(peer: str) -> str:
+    if "const auto paintCanvas" in peer:
+        return peer
+    return replace(peer, """\
+        if (apexAndroidFrame::useTiles
+            && t.apexFrameTiles.paint (env, canvas, clip, scale, t.component, raster))""", """\
+        const auto paintCanvas = [&] (apexAndroidFrame::CanvasGraphics::Resources& resources,
+                                      Rectangle<int> viewport)
+        {
+            apexAndroidFrame::CanvasGraphics graphics (env, canvas, viewport, scale, resources);
+            if (!graphics.succeeded())
+                return false;
+            t.handlePaint (graphics);
+           #if APEX_ANDROID_UI_BENCHMARK
+            if (!graphics.succeeded() && apexAndroidFrame::measuring)
+                __android_log_print (ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                                     "DIRECT_CANVAS_FALLBACK %s", graphics.failureReason());
+           #endif
+            return graphics.succeeded();
+        };
+
+        if (apexAndroidFrame::useTiles
+            && t.apexFrameTiles.paint (env, canvas, clip, scale, t.component, raster, paintCanvas))""")
+
+
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
     add_overlay_paint_bounds(gui / "components/juce_Component.h")
@@ -457,8 +482,9 @@ def configure(root: Path) -> None:
     align_retained_timeline_origin(gui / "components/juce_Component.cpp", software_renderer)
     module = gui / "juce_gui_basics.cpp"
     peer = gui / "native/juce_Windowing_android.cpp"
-    source = Path(__file__).resolve().parents[1] / "Source/ApexAndroidFrameTiles.h"
-    header = gui / "native/ApexAndroidFrameTiles.h"
+    sources = Path(__file__).resolve().parents[1] / "Source"
+    for name in ("ApexAndroidFrameTiles.h", "ApexAndroidCanvasGraphics.h"):
+        (gui / "native" / name).write_bytes((sources / name).read_bytes())
     module_text = module.read_text(encoding="utf-8")
     peer_text = peer.read_text(encoding="utf-8")
     include = '#include "native/ApexAndroidFrameTiles.h"'
@@ -468,8 +494,7 @@ def configure(root: Path) -> None:
         if "void noteApexTimelineMotion (Component& viewport)" not in peer_text:
             peer_text = add_timeline_motion(peer_text)
         peer_text = add_arranger_damage_query(add_horizontal_bitmap_reuse(add_frame_pacing(peer_text)))
-        peer.write_text(add_horizontal_move_damage(peer_text), encoding="utf-8")
-        header.write_bytes(source.read_bytes())
+        peer.write_text(add_direct_timeline_canvas(add_horizontal_move_damage(peer_text)), encoding="utf-8")
         return
 
     module_text = replace(module_text, '#include "native/juce_Windowing_android.cpp"',
@@ -535,9 +560,9 @@ def configure(root: Path) -> None:
             if (apexAndroidFrame::useTiles)
                 damage->add (area);
             localView.callVoidMethod (AndroidView.invalidate,""")
-    header.write_bytes(source.read_bytes())
     peer_text = add_horizontal_bitmap_reuse(add_frame_pacing(add_timeline_motion(peer_text)))
-    peer.write_text(add_horizontal_move_damage(add_arranger_damage_query(peer_text)), encoding="utf-8")
+    peer_text = add_horizontal_move_damage(add_arranger_damage_query(peer_text))
+    peer.write_text(add_direct_timeline_canvas(peer_text), encoding="utf-8")
     module.write_text(module_text, encoding="utf-8")
 
 

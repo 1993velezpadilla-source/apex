@@ -51,6 +51,9 @@ def validate_result(result: dict, scene: str, renderer: str,
     if not result.get("hardware_canvas"):
         raise ValueError("Activity did not use the production accelerated Android Canvas")
     gpu = renderer == "gpu"
+    direct = renderer == "direct-canvas"
+    if result.get("renderer_requested") != renderer:
+        raise ValueError("The requested renderer was not selected")
     if bool(result.get("master_preview_suppressed")) != suppress_master_preview:
         raise ValueError("Java master preview diagnostic switch mismatch")
     if bool(result.get("horizontal_bitmap_reuse")) != reuse_horizontal_bitmaps:
@@ -73,6 +76,11 @@ def validate_result(result: dict, scene: str, renderer: str,
             raise ValueError("No measured Android native window paints")
         if phase["peerTiledFrames"] != (0 if renderer == "int-array" else peer_count):
             raise ValueError("The requested native presentation path was not used")
+        if phase["peerDirectFrames"] != (peer_count if direct else 0):
+            raise ValueError(f"{phase['phase']} did not stay on the requested renderer "
+                             f"({phase['peerDirectFrames']}/{peer_count} direct frames)")
+        if direct and (phase["peerScrollTileFrames"] or phase["peerRetainedScrollFrames"]):
+            raise ValueError("The direct timeline used moving bitmaps")
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
         multi_raster = phase["peerMultiRasterFrames"]
@@ -92,7 +100,7 @@ def validate_result(result: dict, scene: str, renderer: str,
             if after["audioCallbacks"] <= before["audioCallbacks"]:
                 raise ValueError(f"Audio device callbacks did not advance during {phase['phase']}")
         for state in (before, after):
-            if state.get("framePacing") != (renderer == "frame-paced"):
+            if state.get("framePacing") != (renderer in ("frame-paced", "direct-canvas")):
                 raise ValueError("The requested frame pacing policy did not become active")
             if state.get("tracksWindowBuffered") or state.get("timelineWindowBuffered"):
                 raise ValueError("The Android navigation comparison requires direct window painting")
@@ -224,8 +232,18 @@ def validate_cold_scroll(result: dict) -> None:
             for state in (before, after):
                 if any(state[key] != start[key] for key in ("scrollY", "pps", "laneHeight")):
                     raise ValueError(f"{phase['phase']} changed zoom or moved vertically")
-            if phase["peerRetainedScrollFrames"] < 2:
-                raise ValueError(f"{phase['phase']} did not exercise continuous presentation")
+            if result["renderer_requested"] == "direct-canvas":
+                frames = phase["peerWallMs"]["count"]
+                if frames < 2 or phase["peerDirectFrames"] != frames:
+                    raise ValueError(f"{phase['phase']} did not stay on the direct Canvas")
+                if phase["peerScrollTileFrames"] or phase["peerRetainedScrollFrames"]:
+                    raise ValueError(f"{phase['phase']} used moving timeline bitmaps")
+                for state in (before, after):
+                    if any(state[key] for key in ("arrangerPreparedPixels", "arrangerReusePixels",
+                                                  "arrangerRasterPixels", "arrangerCacheRebases")):
+                        raise ValueError(f"{phase['phase']} used the arranger bitmap cache")
+            elif phase["peerRetainedScrollFrames"] < 2:
+                raise ValueError(f"{phase['phase']} did not exercise the retained renderer")
             if after["rebuilds"] != before["rebuilds"]:
                 raise ValueError(f"{phase['phase']} unexpectedly rebuilt clip renderers")
             if not preparation and after["arrangerPreparedPixels"]:
@@ -236,13 +254,13 @@ def validate_cold_scroll(result: dict) -> None:
             raise ValueError(f"No offscreen cache preparation before {first_name}")
         for phase in (first, revisit):
             after = phase["after"]
-            print(f"[FIRST/REPEAT] {result['scene']} prepared={preparation} {phase['phase']} "
+            print(f"[FIRST/REPEAT] {result['scene']} {result['renderer_requested']} {phase['phase']} "
                   f"x={phase['before']['scrollX']}..{after['scrollX']} "
                   f"callback p95/worst={phase['ui_interval_p95_ms']:.1f}/"
                   f"{phase['ui_interval_worst_ms']:.1f}ms "
                   f"peer CPU p95/worst={phase['peerCpuMs']['p95']:.1f}/"
                   f"{phase['peerCpuMs']['worst']:.1f}ms "
-                  f"arranger raster pixels={after['arrangerRasterPixels'] - phase['before']['arrangerRasterPixels']:,} "
+                  f"direct frames={phase['peerDirectFrames']}/{phase['peerWallMs']['count']} "
                   f"pixels prepared before first pass={prepared:,}", flush=True)
 
 
@@ -296,7 +314,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         variant = "legacy-split"
     if pan_replay != "normal":
         variant = pan_replay
-    if cold_scroll_replay:
+    if cold_scroll_replay and renderer != "direct-canvas":
         variant = "cold-scroll-prepared" if prepare_edges else "cold-scroll-baseline"
     name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
@@ -442,51 +460,24 @@ def main() -> int:
     results = []
     failures = []
     try:
-        for scenario in ("slow-clip", "recording", "playback", "empty", "clip", "deep"):
-            slow_pan = scenario == "slow-clip"
-            scene = "clip" if slow_pan else scenario
-            # Compare the 9.9.3 peer traversal and its replacement with the
-            # same compositor, waveform visibility, and input sequence.
-            orders = (("legacy-split", "retained-scroll"), ("retained-scroll", "legacy-split"))
-            if scene == "recording":
-                orders = (("precise-damage", *orders[0]), (*orders[1], "precise-damage"))
-            if scene == "deep":
-                orders += (("int-array",),)
-            if slow_pan:
-                orders = (("threshold-filter", "continuous-filter"),
-                          ("continuous-filter", "threshold-filter"))
-            for repeat, order in enumerate(orders, 1):
-                for variant in order:
-                    retain_translation = slow_pan or variant in ("legacy-split", "retained-scroll")
-                    reuse_horizontal = retain_translation or variant == "precise-damage"
-                    renderer = "frame-paced" if reuse_horizontal else variant
-                    name = f"{scene}-{variant}-{repeat}"
-                    try:
-                        result = run_case(args.output, renderer, scene, repeat,
-                                          reuse_horizontal_bitmaps=reuse_horizontal,
-                                          precise_arranger_damage=reuse_horizontal,
-                                          retain_translated_timeline=retain_translation,
-                                          legacy_full_tree_raster=variant == "legacy-split",
-                                          pan_replay=variant if slow_pan else "normal")
-                        results.append(result)
-                        print(f"Runtime gesture/surface checks passed: {name}", flush=True)
-                    except Exception as error:
-                        failures.append({"case": name, "error": str(error)})
-                        (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
-                        screenshot(args.output / f"{name}-failure.png")
-                        print(f"Runtime check FAILED: {name}: {error}", flush=True)
-        for scene, order in (("empty", (False, True)),
-                             ("clip", (True, False)),
-                             ("recording", (False, True))):
-            for prepare_edges in order:
-                name = f"{scene}-cold-scroll-{'prepared' if prepare_edges else 'baseline'}-1"
+        # Compare the shipped 9.9.6 renderer and the direct Canvas in the
+        # same APK. Alternate order and repeat the empty-project comparison.
+        scenes = (("empty", 1, False), ("clip", 1, True), ("playback", 1, False),
+                  ("recording", 1, True), ("empty", 2, True), ("deep", 1, False))
+        for scene, repeat, direct_first in scenes:
+            for direct in (direct_first, not direct_first):
+                cold = scene != "deep"
+                renderer = "direct-canvas" if direct else "frame-paced"
+                variant = renderer if direct else ("cold-scroll-prepared" if cold else "retained-scroll")
+                name = f"{scene}-{variant}-{repeat}"
                 try:
-                    result = run_case(args.output, "frame-paced", scene, 1,
-                                      reuse_horizontal_bitmaps=True, precise_arranger_damage=True,
-                                      retain_translated_timeline=True, cold_scroll_replay=True,
-                                      prepare_edges=prepare_edges)
+                    result = run_case(args.output, renderer, scene, repeat,
+                                      reuse_horizontal_bitmaps=not direct,
+                                      precise_arranger_damage=True,
+                                      retain_translated_timeline=not direct,
+                                      cold_scroll_replay=cold, prepare_edges=not direct)
                     results.append(result)
-                    print(f"Runtime first/repeat checks passed: {name}", flush=True)
+                    print(f"Runtime gesture/surface checks passed: {name}", flush=True)
                 except Exception as error:
                     failures.append({"case": name, "error": str(error)})
                     (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
@@ -533,36 +524,19 @@ def main() -> int:
                   f"checks/event={scans_per_scroll:.2f}, "
                   f"arranger pixels reused={reused:,}/redrawn={redrawn:,} "
                   f"cache pixels shifted={copied:,} rebases={rebased}")
-    for result in results:
-        if result["pan_replay"] == "normal":
+    for scene, repeat, _ in scenes:
+        cases = {r["renderer_requested"]: r for r in results
+                 if r["scene"] == scene and r["repeat"] == repeat}
+        if len(cases) != 2:
             continue
-        for phase in result["phases"]:
-            axis = {"pan": "x", "reverse": "x", "vertical-pan": "y"}.get(phase["phase"])
-            if axis is not None:
-                hold, unit, jump = phase["unitPanSteps"][axis]
-                print(f"[PAN-CADENCE] {result['pan_replay']} pass={result['repeat']} {phase['phase']} "
-                      f"hold={hold} unit={unit} jump={jump}", flush=True)
-    for scene in ("empty", "clip", "playback", "recording", "deep"):
-        for repeat in (1, 2):
-            paired = {r["variant"]: r for r in results
-                      if r["scene"] == scene and r["repeat"] == repeat
-                      and r["horizontal_bitmap_reuse"]
-                      and not r["master_preview_suppressed"]}
-            if "retained-scroll" not in paired:
+        for baseline, direct in zip(cases["frame-paced"]["phases"], cases["direct-canvas"]["phases"]):
+            if baseline["phase"] not in ("pan", "revisit", "post-x-pan", "post-y-pan"):
                 continue
-            for control in ("legacy-split", "precise-damage"):
-                if control not in paired:
-                    continue
-                for before, after in zip(paired[control]["phases"], paired["retained-scroll"]["phases"]):
-                    print(f"[SCROLL-A/B] {scene} pass={repeat} {after['phase']} control={control} "
-                          f"callback p95={before['ui_interval_p95_ms']:.1f}/{after['ui_interval_p95_ms']:.1f}ms "
-                          f"worst={before['ui_interval_worst_ms']:.1f}/{after['ui_interval_worst_ms']:.1f}ms "
-                          f"window p95={before['windowTotalMs']['p95']:.1f}/{after['windowTotalMs']['p95']:.1f}ms "
-                          f"raster CPU p95={before['peerRasterCpuMs']['p95']:.1f}/{after['peerRasterCpuMs']['p95']:.1f}ms "
-                          f"raster px/frame={before.get('peerMeanPixels', 0):,}/{after.get('peerMeanPixels', 0):,} "
-                          f"repeated window rasters={before['peerMultiRasterFrames']}/{after['peerMultiRasterFrames']} "
-                          f"retained scroll frames={after['peerRetainedScrollFrames']}/{after['peerWallMs']['count']} "
-                          f"retained px={after['peerRetainedScrollPixels']:,}")
+            print(f"[DIRECT-CANVAS-A/B] {scene} repeat={repeat} {direct['phase']} "
+                  f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{direct['ui_interval_p95_ms']:.1f} ms "
+                  f"worst={baseline['ui_interval_worst_ms']:.1f}/{direct['ui_interval_worst_ms']:.1f} ms "
+                  f"peer CPU p95={baseline['peerCpuMs']['p95']:.1f}/{direct['peerCpuMs']['p95']:.1f} ms "
+                  f"software px/frame={baseline.get('peerMeanPixels', 0):,}/{direct.get('peerMeanPixels', 0):,}", flush=True)
     # This job validates gesture correctness, NOT 60fps presentation.
     # The x86_64 SwiftShader emulator reports Choreographer callback spacing,
     # not SurfaceFlinger-presented frame intervals. Report misses explicitly

@@ -16,6 +16,7 @@ on:
       - ".github/workflows/apex-android-ui-runtime.yml"
       - "Android/Source/ApexUiBenchmark.java"
       - "Android/Source/ApexAndroidFrameTiles.h"
+      - "Android/Source/ApexAndroidCanvasGraphics.h"
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"
       - "My DAW/DAW_Core/DAW_Core.jucer"
