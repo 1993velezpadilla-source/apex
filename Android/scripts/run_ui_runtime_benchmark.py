@@ -26,7 +26,8 @@ def adb(*args: str, binary: bool = False):
 def validate_result(result: dict, scene: str, renderer: str,
                     suppress_master_preview: bool = False,
                     reuse_horizontal_bitmaps: bool = False,
-                    precise_arranger_damage: bool = False) -> None:
+                    precise_arranger_damage: bool = False,
+                    retain_translated_timeline: bool = False) -> None:
     if result.get("error"):
         raise ValueError("Native benchmark error: " + str(result["error"]))
     phases = result.get("phases", [])
@@ -43,6 +44,8 @@ def validate_result(result: dict, scene: str, renderer: str,
         raise ValueError("Java horizontal bitmap reuse switch mismatch")
     if bool(result.get("precise_arranger_damage")) != precise_arranger_damage:
         raise ValueError("Java arranger damage clipping switch mismatch")
+    if bool(result.get("retain_translated_timeline")) != retain_translated_timeline:
+        raise ValueError("Java retained timeline translation switch mismatch")
     for phase in phases:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
@@ -94,6 +97,12 @@ def validate_result(result: dict, scene: str, renderer: str,
         raise ValueError("Baseline unexpectedly reused compositor bitmaps")
     if reuse_horizontal_bitmaps and any(not phases[i].get("peerScrollTileFrames") for i in (0, 4)):
         raise ValueError("Horizontal gestures did not exercise the compositor bitmap reuse path")
+    retained = sum(phase["peerRetainedScrollFrames"] for phase in phases)
+    if not retain_translated_timeline and retained:
+        raise ValueError("Control case unexpectedly skipped the timeline body raster")
+    if retain_translated_timeline and scene == "empty" and not any(
+            phases[i]["peerRetainedScrollFrames"] for i in (0, 4)):
+        raise ValueError("Empty timeline did not exercise damage-only horizontal translation")
     if scene == "recording":
         # The old 30-second extent trapped REC pans near bar 15 even while
         # the audio callback continued to write new samples. The benchmark
@@ -209,10 +218,12 @@ def screenshot(path: Path) -> None:
 def run_case(output: Path, renderer: str, scene: str, repeat: int,
              suppress_master_preview: bool = False,
              reuse_horizontal_bitmaps: bool = False,
-             precise_arranger_damage: bool = False) -> dict:
+             precise_arranger_damage: bool = False,
+             retain_translated_timeline: bool = False) -> dict:
     # Only a disposable CI emulator may disable the master waveform.
-    variant = "precise-damage" if precise_arranger_damage else (
-        "horizontal-reuse" if reuse_horizontal_bitmaps else renderer)
+    variant = "retained-scroll" if retain_translated_timeline else (
+        "precise-damage" if precise_arranger_damage else (
+            "horizontal-reuse" if reuse_horizontal_bitmaps else renderer))
     name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
@@ -225,7 +236,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         "--ez", "apex_horizontal_bitmap_reuse",
         "true" if reuse_horizontal_bitmaps else "false",
         "--ez", "apex_precise_arranger_damage",
-        "true" if precise_arranger_damage else "false")
+        "true" if precise_arranger_damage else "false",
+        "--ez", "apex_retain_translated_timeline",
+        "true" if retain_translated_timeline else "false")
     deadline = time.monotonic() + 100
     ready = None
     before = False
@@ -294,7 +307,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     screenshot(output / f"{name}-after.png")
     record_focus(output / f"{name}-after-window.txt")
     validate_result(result, scene, renderer, suppress_master_preview,
-                    reuse_horizontal_bitmaps, precise_arranger_damage)
+                    reuse_horizontal_bitmaps, precise_arranger_damage, retain_translated_timeline)
     first = (output / f"{name}-before.png").read_bytes()
     last = (output / f"{name}-after.png").read_bytes()
     if hashlib.sha256(first).digest() == hashlib.sha256(last).digest():
@@ -327,40 +340,24 @@ def main() -> int:
     results = []
     failures = []
     try:
-        for scene in ("playback", "recording", "empty", "clip", "deep"):
-            # Both variants use the 9.6 compositor. Compare the Android
-            # header, body-damage and waveform paint changes in both orders.
-            orders = (("horizontal-reuse", "precise-damage"), ("precise-damage", "horizontal-reuse"))
+        for scene in ("empty", "clip", "playback", "recording", "deep"):
+            # 9.8 production policy vs damage-only scroll, counterbalanced.
+            # Both runs keep the imported clip, master and live waveforms visible.
+            orders = (("precise-damage", "retained-scroll"), ("retained-scroll", "precise-damage"))
             if scene == "deep":
                 orders += (("int-array",),)
             for repeat, order in enumerate(orders, 1):
                 for variant in order:
-                    reuse_horizontal = variant in ("horizontal-reuse", "precise-damage")
+                    reuse_horizontal = variant in ("precise-damage", "retained-scroll")
                     renderer = "frame-paced" if reuse_horizontal else variant
                     name = f"{scene}-{variant}-{repeat}"
                     try:
                         result = run_case(args.output, renderer, scene, repeat,
                                           reuse_horizontal_bitmaps=reuse_horizontal,
-                                          precise_arranger_damage=variant == "precise-damage")
+                                          precise_arranger_damage=reuse_horizontal,
+                                          retain_translated_timeline=variant == "retained-scroll")
                         results.append(result)
                         print(f"Runtime gesture/surface checks passed: {name}", flush=True)
-                        if (scene in ("playback", "recording") and variant == "horizontal-reuse"
-                                and repeat == 2):
-                            # Paired A/B playback/REC, preserving the imported
-                            # clip and live-take waveforms. Only master is
-                            # suppressed in this benchmark-only control.
-                            control_name = f"{scene}-{variant}-master-off-{repeat}"
-                            try:
-                                control = run_case(args.output, renderer, scene, repeat,
-                                                   suppress_master_preview=True,
-                                                   reuse_horizontal_bitmaps=True)
-                                results.append(control)
-                                print(f"[MASTER-A/B] diagnostic control passed: {control_name}",
-                                      flush=True)
-                            except Exception as error:
-                                failures.append({"case": control_name, "error": str(error)})
-                                print(f"Runtime check FAILED: {control_name}: {error}",
-                                      flush=True)
                     except Exception as error:
                         failures.append({"case": name, "error": str(error)})
                         (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
@@ -408,44 +405,21 @@ def main() -> int:
                   f"cache pixels shifted={copied:,} rebases={rebased}")
     for scene in ("empty", "clip", "playback", "recording", "deep"):
         for repeat in (1, 2):
-            paired = {r["precise_arranger_damage"]: r for r in results
+            paired = {r["retain_translated_timeline"]: r for r in results
                       if r["scene"] == scene and r["repeat"] == repeat
                       and r["horizontal_bitmap_reuse"]
                       and not r["master_preview_suppressed"]}
             if len(paired) < 2:
                 continue
-            for phase_index in (0, 3, 4, 5):
-                baseline, precise = (paired[enabled]["phases"][phase_index] for enabled in (False, True))
-                print(f"[DAMAGE-A/B] {scene} pass={repeat} {precise['phase']} "
-                      f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{precise['ui_interval_p95_ms']:.1f}ms "
-                      f"worst={baseline['ui_interval_worst_ms']:.1f}/{precise['ui_interval_worst_ms']:.1f}ms "
-                      f"window p95={baseline['windowTotalMs']['p95']:.1f}/{precise['windowTotalMs']['p95']:.1f}ms "
-                      f"raster CPU p95={baseline['peerRasterCpuMs']['p95']:.1f}/{precise['peerRasterCpuMs']['p95']:.1f}ms "
-                      f"GPU p95={baseline['windowGpuMs']['p95']:.1f}/{precise['windowGpuMs']['p95']:.1f}ms")
-    # A/B is diagnostic, not a pass/fail 60fps certification. Use the same
-    # renderer/transport and report the master work separately from rendering.
-    for scene in ("playback", "recording"):
-        paired = [x for x in results if x["scene"] == scene
-                  and x["variant"] == "horizontal-reuse"
-                  and x["repeat"] == 2]
-        enabled = next((x for x in paired if not x.get("master_preview_suppressed")), None)
-        disabled = next((x for x in paired if x.get("master_preview_suppressed")), None)
-        if enabled is not None and disabled is not None:
-            for axis in ("pan", "reverse", "vertical-pan", "idle"):
-                on = next(p for p in enabled["phases"] if p["phase"] == axis)
-                off = next(p for p in disabled["phases"] if p["phase"] == axis)
-                on_ms = on["ui_interval_p95_ms"]
-                off_ms = off["ui_interval_p95_ms"]
-                on_repaints = (on["after"]["masterPreviewRepaintCalls"]
-                               - on["before"]["masterPreviewRepaintCalls"])
-                off_repaints = (off["after"]["masterPreviewRepaintCalls"]
-                                - off["before"]["masterPreviewRepaintCalls"])
-                print(f"[MASTER-A/B] {scene} {axis}: on p95={on_ms:.1f}ms "
-                      f"off p95={off_ms:.1f}ms delta={on_ms-off_ms:+.1f}ms "
-                      f"master repaint requests on={on_repaints} off={off_repaints} "
-                      f"master update p95={on['after']['masterPreviewUpdateMs']['p95']:.3f}ms "
-                      f"master draw p95={on['after']['masterPreviewPaintMs']['p95']:.3f}ms",
-                      flush=True)
+            for before, after in zip(paired[False]["phases"], paired[True]["phases"]):
+                print(f"[SCROLL-A/B] {scene} pass={repeat} {after['phase']} "
+                      f"callback p95={before['ui_interval_p95_ms']:.1f}/{after['ui_interval_p95_ms']:.1f}ms "
+                      f"worst={before['ui_interval_worst_ms']:.1f}/{after['ui_interval_worst_ms']:.1f}ms "
+                      f"window p95={before['windowTotalMs']['p95']:.1f}/{after['windowTotalMs']['p95']:.1f}ms "
+                      f"raster CPU p95={before['peerRasterCpuMs']['p95']:.1f}/{after['peerRasterCpuMs']['p95']:.1f}ms "
+                      f"raster px/frame={before.get('peerMeanPixels', 0):,}/{after.get('peerMeanPixels', 0):,} "
+                      f"retained scroll frames={after['peerRetainedScrollFrames']}/{after['peerWallMs']['count']} "
+                      f"retained px={after['peerRetainedScrollPixels']:,}")
     # This job validates gesture correctness, NOT 60fps presentation.
     # The x86_64 SwiftShader emulator reports Choreographer callback spacing,
     # not SurfaceFlinger-presented frame intervals. Report misses explicitly

@@ -42,7 +42,7 @@ def set_zoom_preview_install_id(content: str) -> str:
     # own install identity while retaining the generated Java namespace.
     install_ids = {
         "zoomrewrite": "zoomrewrite.r71",
-        "framecache": "framecache.r98",
+        "framecache": "framecache.r99",
     }
     return re.sub(
         r'(?m)^([ \t]*applicationId[ \t]+")com\.xziel\.apex\.(zoomrewrite|framecache)(")',

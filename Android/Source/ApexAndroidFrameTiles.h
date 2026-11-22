@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <ctime>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -52,6 +53,7 @@ static bool reduceTimelineMotion = false;
 static bool framePacingEnabled = true;
 static bool horizontalBitmapReuse = false;
 static bool preciseArrangerDamage = false;
+static bool retainTranslatedTimeline = false;
 // Only the disposable Android UI benchmark may suppress the master preview.
 static bool benchmarkSuppressMasterPreview = false;
 #else
@@ -63,9 +65,32 @@ static constexpr bool preciseArrangerDamage = true;
     static constexpr bool horizontalBitmapReuse = false;
    #endif
 static constexpr bool benchmarkSuppressMasterPreview = false;
+static constexpr bool retainTranslatedTimeline = horizontalBitmapReuse;
 // The matched emulator replay showed longer frame delays with this layer.
 static constexpr bool reduceTimelineMotion = false;
 #endif
+
+// Set only around the two parent repaints from a horizontal bounds move.
+// Normal invalidation still travels through JUCE's component caches.
+static thread_local const Component* horizontalMoveRepaintSource = nullptr;
+
+struct HorizontalMoveDamage
+{
+    void add(Rectangle<int> area, int originX)
+    {
+        if (regions.isEmpty())
+            minX = maxX = originX;
+        else
+        {
+            minX = jmin(minX, originX);
+            maxX = jmax(maxX, originX);
+        }
+        regions.add(area);
+    }
+
+    RectangleList<int> regions;
+    int minX = 0, maxX = 0;
+};
 
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 // Shared across the benchmark's input and paint instrumentation. The epoch
@@ -76,7 +101,7 @@ static uint32_t measurementEpoch = 0;
 
 struct Damage
 {
-    void add(Rectangle<int> area)
+    void add(Rectangle<int> area, std::optional<int> movingContentX = std::nullopt)
     {
         if (area.isEmpty())
             return;
@@ -88,6 +113,11 @@ struct Damage
         if (lastSurfacePixels > 0 && pixels * 100 >= lastSurfacePixels * 90)
             ++fullSurfaceRequests;
        #endif
+        if (movingContentX)
+        {
+            horizontalMoves.add(area.expanded(1), *movingContentX);
+            return;
+        }
         pending.add(area.expanded(1));
         if (pending.getNumRectangles() > 64)
             pending = RectangleList<int>(pending.getBounds());
@@ -153,6 +183,7 @@ struct Damage
    #endif
 
     RectangleList<int> pending;
+    HorizontalMoveDamage horizontalMoves;
     bool hardwareCanvas = false;
     bool viewInvalidated = false;
 };
@@ -168,7 +199,50 @@ struct HorizontalTileScroll
 {
     Rectangle<int> area;
     int offset = 0;
+    Point<int> contentOrigin;
+    const Component* content = nullptr;
+    bool unobstructed = false;
 };
+
+static int64_t snapDeviceX(int logicalX, float scale) noexcept
+{
+    return static_cast<int64_t>(std::floor(static_cast<double>(logicalX) * scale + 0.5));
+}
+
+static void addExposedScrollDamage(RectangleList<int>& redraw,
+                                   const HorizontalMoveDamage& moves,
+                                   const HorizontalTileScroll& scroll,
+                                   int deltaX, float scale)
+{
+    const auto body = scroll.area;
+    const auto origin = snapDeviceX(scroll.contentOrigin.x, scale);
+    const auto left = origin - snapDeviceX(moves.maxX, scale);
+    const auto right = origin - snapDeviceX(moves.minX, scale);
+
+    // Pending content damage can predate one or more coalesced moves. Keep
+    // its fixed location as well as every possible translated location.
+    const auto pending = redraw;
+    for (const auto& rect : pending)
+    {
+        const auto dirty = rect.getIntersection(body);
+        if (!dirty.isEmpty())
+            redraw.add(Rectangle<int>::leftTopRightBottom(
+                static_cast<int>(jmax<int64_t>(body.getX(), dirty.getX() + jmin<int64_t>(0, left))),
+                dirty.getY(),
+                static_cast<int>(jmin<int64_t>(body.getRight(), dirty.getRight() + jmax<int64_t>(0, right))),
+                dirty.getBottom()));
+    }
+
+    // The header and other stationary chrome still need the original
+    // JUCE movement repaint. Only the timeline body can be translated.
+    auto fixed = moves.regions;
+    fixed.subtract(body);
+    redraw.add(fixed);
+    if (deltaX > 0)
+        redraw.add(body.withWidth(jmin(body.getWidth(), deltaX + 2)));
+    else if (deltaX < 0)
+        redraw.add(body.withTrimmedLeft(jmax(0, body.getWidth() + deltaX - 2)));
+}
 
 class BitmapTiles
 {
@@ -186,20 +260,50 @@ public:
 
     template <typename Raster>
     bool update(JNIEnv* env, Rectangle<int> clip, float scale, bool opaque,
-                RectangleList<int> redraw, Raster&& raster, HorizontalTileScroll scroll = {})
+                RectangleList<int> redraw, Raster&& raster, HorizontalTileScroll scroll = {},
+                const HorizontalMoveDamage& moves = {})
     {
        #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-        updatedTilePixels = reusedTilePixels = 0;
+        updatedTilePixels = reusedTilePixels = retainedScrollPixels = 0;
        #endif
         const bool reset = needsReset(clip, scale, opaque, scroll.area);
         if (reset && !resetFrame(env, clip, scale, opaque, scroll.area))
             return false;
 
-        // Reconcile every visible pixel when the tiles move. The shadow
-        // comparison also catches fixed UI, playhead, loop and live peaks.
-        const bool scrolled = scroll.offset != frameScrollOffset;
-        if (scrolled)
-            redraw.add(scroll.area);
+        const auto delta = snapDeviceX(scroll.contentOrigin.x, scale)
+                         - snapDeviceX(lastScroll.contentOrigin.x, scale);
+        const bool scrolled = !scroll.area.isEmpty() && delta != 0;
+        // Only translate a composited body when its screen coverage, Y and
+        // subpixel phase have stayed the same. Other moves reconcile it
+        // using the complete raster and shadow comparison.
+        const auto exactDelta = (static_cast<double>(scroll.contentOrigin.x)
+                                  - lastScroll.contentOrigin.x) * scale;
+        const bool canTranslate = !reset && !moves.regions.isEmpty()
+            && scroll.unobstructed && lastScroll.unobstructed
+            && scroll.content == lastScroll.content
+            && scroll.contentOrigin.y == lastScroll.contentOrigin.y
+            && std::abs(delta) < scroll.area.getWidth()
+            && std::abs(exactDelta - static_cast<double>(delta)) < 0.0001;
+        if (canTranslate)
+        {
+            addExposedScrollDamage(redraw, moves, scroll, static_cast<int>(delta), scale);
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            if (scrolled)
+            {
+                auto retained = RectangleList<int>(scroll.area);
+                retained.subtract(redraw);
+                for (const auto& area : retained)
+                    retainedScrollPixels += area.getWidth() * area.getHeight();
+            }
+           #endif
+        }
+        else
+        {
+            redraw.add(moves.regions);
+            if (scrolled)
+                redraw.add(scroll.area);
+        }
+        lastScroll = scroll;
         frameScrollOffset = scroll.offset;
         redraw.clipTo(clip);
         redraw.offsetAll(-clip.getPosition());
@@ -298,7 +402,7 @@ public:
     }
 
    #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-    int updatedTilePixels = 0, reusedTilePixels = 0;
+    int updatedTilePixels = 0, reusedTilePixels = 0, retainedScrollPixels = 0;
     bool hasScrollTiles() const noexcept { return !frameScrollArea.isEmpty(); }
    #endif
 
@@ -557,6 +661,7 @@ private:
     Image backing;
     std::vector<Tile> tiles;
     Rectangle<int> frameBounds, frameScrollArea;
+    HorizontalTileScroll lastScroll;
     int frameScrollOffset = 0;
     float frameScale = 0.0f;
     bool frameOpaque = false;
@@ -584,6 +689,16 @@ public:
         if (horizontalViewport.getComponent() != &viewport)
             horizontalViewport = &viewport;
         timelineHeaderHeight = headerHeight;
+    }
+
+    std::optional<int> horizontalMoveOrigin(const Component& root) const
+    {
+        const auto* source = horizontalMoveRepaintSource;
+        if (retainTranslatedTimeline && source != nullptr && damage->hardwareCanvas)
+            if (const auto* viewport = horizontalViewport.getComponent())
+                if (source == viewport->getViewedComponent())
+                    return root.getLocalPoint(source, Point<int>{}).x;
+        return std::nullopt;
     }
 
     void invalidate() noexcept
@@ -637,6 +752,7 @@ public:
                 .getSmallestIntegerContainer().getIntersection(clip);
 
         auto redraw = std::exchange(damage->pending, {});
+        auto moves = std::exchange(damage->horizontalMoves, {});
        #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         damage->logAndReset(surface, clip, redraw);
        #endif
@@ -649,13 +765,15 @@ public:
         }
         if (!motionArea.isEmpty())
         {
+            redraw.add(moves.regions);
+            moves = {};
             if (motionTiles.needsReset(motionArea, scale, true))
                 redraw.add(motionArea);
             if (!motionTiles.update(env, motionArea, scale, true, redraw, raster))
                 return false;
             redraw.subtract(motionArea);
         }
-        if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), raster, scroll))
+        if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), raster, scroll, moves))
             return false;
 
         damage->hardwareCanvas = framePacingEnabled && hardwareCanvas;
@@ -673,10 +791,38 @@ public:
         return nativeTiles.updatedTilePixels + (drawsMotionLayer() ? motionTiles.updatedTilePixels : 0);
     }
     int getReusedTilePixels() const noexcept { return nativeTiles.reusedTilePixels; }
+    int getRetainedScrollPixels() const noexcept { return nativeTiles.retainedScrollPixels; }
     bool drawsScrollTiles() const noexcept { return nativeTiles.hasScrollTiles(); }
    #endif
 
 private:
+    static bool hasUnobstructedBody(const Component& root, const Component& content,
+                                    Rectangle<int> bodyInRoot)
+    {
+        if (!content.isOpaque() || !root.getLocalBounds().contains(bodyInRoot))
+            return false;
+
+        for (auto* child = &content; child != &root; )
+        {
+            const auto* parent = child->getParentComponent();
+            if (parent == nullptr || child->isTransformed() || child->getAlpha() != 1.0f
+                || child->getCachedComponentImage() != nullptr
+                || !root.getLocalArea(child, child->getLocalBounds()).contains(bodyInRoot))
+                return false;
+
+            for (int index = parent->getIndexOfChildComponent(child) + 1;
+                 index < parent->getNumChildComponents(); ++index)
+            {
+                const auto* sibling = parent->getChildComponent(index);
+                if (sibling->isVisible()
+                    && root.getLocalArea(sibling, sibling->getLocalBounds()).intersects(bodyInRoot))
+                    return false;
+            }
+            child = parent;
+        }
+        return true;
+    }
+
     HorizontalTileScroll timelineScroll(const Component& root, Rectangle<int> surface, float scale) const
     {
         const auto* viewport = horizontalViewport.getComponent();
@@ -689,18 +835,20 @@ private:
 
         const auto body = viewport->getLocalBounds().withWidth(viewport->getViewWidth())
             .withHeight(viewport->getViewHeight()).withTrimmedTop(timelineHeaderHeight);
-        const auto area = (root.getLocalArea(viewport, body).toFloat() * scale)
+        const auto bodyInRoot = root.getLocalArea(viewport, body);
+        const auto area = (bodyInRoot.toFloat() * scale)
             .getSmallestIntegerContainer().getIntersection(surface);
         if (area.isEmpty() || static_cast<int64_t>(area.getWidth()) * area.getHeight() > 4'000'000)
             return {};
 
         // Match the software blit's device-pixel origin. Rounding the scroll
         // distance alone introduces one-pixel mismatches at fractional DPI.
-        const auto contentX = root.getLocalPoint(content, Point<int>{}).x;
-        const auto origin = static_cast<int64_t>(std::floor(static_cast<double>(contentX) * scale + 0.5));
+        const auto contentOrigin = root.getLocalPoint(content, Point<int>{});
+        const auto origin = snapDeviceX(contentOrigin.x, scale);
         const int width = area.getWidth();
         const int offset = static_cast<int>(-origin % width);
-        return { area, offset < 0 ? offset + width : offset };
+        return { area, offset < 0 ? offset + width : offset, contentOrigin, content,
+                 retainTranslatedTimeline && hasUnobstructedBody(root, *content, bodyInRoot) };
     }
 
     void timerCallback() override
@@ -728,7 +876,7 @@ struct FrameSample
 {
     jlong wallNs = 0, cpuNs = 0, rasterNs = 0, pixels = 0, usedTiles = 0;
     jlong rasterCpuNs = 0;
-    jlong updatedTilePixels = 0, reusedTilePixels = 0;
+    jlong updatedTilePixels = 0, reusedTilePixels = 0, retainedScrollPixels = 0;
 };
 static std::array<FrameSample, 2048> recordedFrames {};
 static std::size_t frameCount = 0;
@@ -931,6 +1079,7 @@ public:
             sample.usedTiles = tiles.drawsMotionLayer() ? 2 : (tiles.drawsScrollTiles() ? 3 : 1);
             sample.updatedTilePixels = tiles.getUpdatedTilePixels();
             sample.reusedTilePixels = tiles.getReusedTilePixels();
+            sample.retainedScrollPixels = tiles.getRetainedScrollPixels();
         }
     }
 
@@ -954,7 +1103,8 @@ static constexpr bool useTiles = true;
 extern "C" JNIEXPORT void JNICALL
 Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced,
-    jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage)
+    jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage,
+    jboolean retainTranslation)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
@@ -962,6 +1112,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     juce::apexAndroidFrame::benchmarkSuppressMasterPreview = suppressMasterPreview == JNI_TRUE;
     juce::apexAndroidFrame::horizontalBitmapReuse = reuseHorizontalBitmaps == JNI_TRUE;
     juce::apexAndroidFrame::preciseArrangerDamage = preciseDamage == JNI_TRUE;
+    juce::apexAndroidFrame::retainTranslatedTimeline = retainTranslation == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
@@ -981,13 +1132,13 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
     }
     ComponentPaintProbe::logTop(frameCount);
     std::vector<jlong> values;
-    values.reserve(frameCount * 8);
+    values.reserve(frameCount * 9);
     for (std::size_t i = 0; i < frameCount; ++i)
     {
         const auto& f = recordedFrames[i];
         values.insert(values.end(), { f.wallNs, f.cpuNs, f.rasterNs, f.pixels,
                                       f.usedTiles, f.rasterCpuNs, f.updatedTilePixels,
-                                      f.reusedTilePixels });
+                                      f.reusedTilePixels, f.retainedScrollPixels });
     }
     const auto count = (jsize)values.size();
     auto result = env->NewLongArray(count);

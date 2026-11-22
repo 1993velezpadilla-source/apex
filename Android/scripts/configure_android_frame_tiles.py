@@ -138,6 +138,45 @@ void setApexTimelineViewport (Viewport& viewport, int headerHeight)
 {""")
 
 
+def add_horizontal_move_damage(peer: str) -> str:
+    if "apexFrameTiles.horizontalMoveOrigin (component)" in peer:
+        return peer
+    peer = replace(peer, """\
+        auto damage = apexFrameTiles.damage;
+        callOnMessageThread ([area, localView, damage = std::move (damage)]""", """\
+        auto damage = apexFrameTiles.damage;
+        const auto movingContentX = apexFrameTiles.horizontalMoveOrigin (component);
+        callOnMessageThread ([area, localView, damage = std::move (damage), movingContentX]""")
+    return replace(peer, "                damage->add (area);",
+                         "                damage->add (area, movingContentX);")
+
+
+def mark_horizontal_move_repaints(path: Path) -> None:
+    contents = path.read_text(encoding="utf-8")
+    if "apexAndroidFrame::horizontalMoveRepaintSource" in contents:
+        return
+    start = contents.index("void Component::setBounds (int x, int y, int w, int h)")
+    end = contents.index("void Component::sendMovedResizedMessagesIfPending()", start)
+    bounds = contents[start:end]
+    if bounds.count("repaintParent();") != 2:
+        raise ValueError("Unexpected JUCE Component move repaints")
+    bounds = bounds.replace("repaintParent();", "repaintParentForBoundsChange();")
+    bounds = replace(bounds, "        const bool showing = isShowing();", """\
+        const bool showing = isShowing();
+       #if JUCE_ANDROID
+        const bool translated = wasMoved && ! wasResized && getY() == y;
+       #endif
+        const auto repaintParentForBoundsChange = [&]
+        {
+           #if JUCE_ANDROID
+            const ScopedValueSetter<const Component*> origin (apexAndroidFrame::horizontalMoveRepaintSource,
+                                                               translated ? this : nullptr);
+           #endif
+            repaintParent();
+        };""")
+    path.write_text(contents[:start] + bounds + contents[end:], encoding="utf-8")
+
+
 def configure_component_paint_probe(gui: Path) -> None:
     for path, signature, component in (
         (gui / "components/juce_Component.cpp", "void Component::paintWithinParentContext (Graphics& g)", "*this"),
@@ -324,6 +363,7 @@ def add_waveform_column_fill(path: Path) -> None:
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
     configure_component_paint_probe(gui)
+    mark_horizontal_move_repaints(gui / "components/juce_Component.cpp")
     graphics = root / "modules/juce_graphics"
     bound_wide_software_clips(graphics / "native/juce_RenderingHelpers.h")
     query_scaled_clip_coverage(graphics / "native/juce_RenderingHelpers.h")
@@ -343,8 +383,8 @@ def configure(root: Path) -> None:
             raise ValueError("Incomplete APEX Android renderer")
         if "void noteApexTimelineMotion (Component& viewport)" not in peer_text:
             peer_text = add_timeline_motion(peer_text)
-        peer.write_text(add_arranger_damage_query(add_horizontal_bitmap_reuse(add_frame_pacing(peer_text))),
-                        encoding="utf-8")
+        peer_text = add_arranger_damage_query(add_horizontal_bitmap_reuse(add_frame_pacing(peer_text)))
+        peer.write_text(add_horizontal_move_damage(peer_text), encoding="utf-8")
         header.write_bytes(source.read_bytes())
         return
 
@@ -413,7 +453,7 @@ def configure(root: Path) -> None:
             localView.callVoidMethod (AndroidView.invalidate,""")
     header.write_bytes(source.read_bytes())
     peer_text = add_horizontal_bitmap_reuse(add_frame_pacing(add_timeline_motion(peer_text)))
-    peer.write_text(add_arranger_damage_query(peer_text), encoding="utf-8")
+    peer.write_text(add_horizontal_move_damage(add_arranger_damage_query(peer_text)), encoding="utf-8")
     module.write_text(module_text, encoding="utf-8")
 
 
