@@ -443,17 +443,9 @@ def align_retained_timeline_origin(component: Path, software_renderer: Path) -> 
 
 
 def add_direct_timeline_canvas(peer: str) -> str:
-    original = """\
-                                      Rectangle<int> viewport)
-        {
-            apexAndroidFrame::CanvasGraphics graphics (env, canvas, viewport, scale, resources);"""
-    layered = """\
-                                      jobject targetCanvas, Rectangle<int> viewport, Point<int> targetOrigin)
-        {
-            apexAndroidFrame::CanvasGraphics graphics (env, targetCanvas, viewport, scale, resources, targetOrigin);"""
     if "const auto paintCanvas" in peer:
-        return peer if "jobject targetCanvas" in peer else replace(peer, original, layered)
-    peer = replace(peer, """\
+        return peer
+    return replace(peer, """\
         if (apexAndroidFrame::useTiles
             && t.apexFrameTiles.paint (env, canvas, clip, scale, t.component, raster))""", """\
         const auto paintCanvas = [&] (apexAndroidFrame::CanvasGraphics::Resources& resources,
@@ -473,7 +465,6 @@ def add_direct_timeline_canvas(peer: str) -> str:
 
         if (apexAndroidFrame::useTiles
             && t.apexFrameTiles.paint (env, canvas, clip, scale, t.component, raster, paintCanvas))""")
-    return replace(peer, original, layered)
 
 
 def configure(root: Path) -> None:

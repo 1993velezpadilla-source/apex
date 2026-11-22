@@ -14,7 +14,7 @@ import subprocess
 import time
 
 PACKAGE = "com.xziel.apex.mobileportrait"
-DIRECT_RENDERERS = ("direct-canvas", "layered-canvas")
+DIRECT_RENDERERS = ("direct-canvas", "optimized-canvas")
 PHASES = ("pan", "pinch", "unpinch", "idle", "reverse",
           "vertical-pan", "vertical-pinch", "vertical-unpinch")
 COLD_SCROLL_TRAVERSALS = (
@@ -64,7 +64,7 @@ def validate_result(result: dict, scene: str, renderer: str,
         raise ValueError("Activity did not use the production accelerated Android Canvas")
     gpu = renderer == "gpu"
     direct = renderer in DIRECT_RENDERERS
-    layered = renderer == "layered-canvas"
+    optimized = renderer == "optimized-canvas"
     if result.get("renderer_requested") != renderer:
         raise ValueError("The requested renderer was not selected")
     if bool(result.get("master_preview_suppressed")) != suppress_master_preview:
@@ -87,20 +87,17 @@ def validate_result(result: dict, scene: str, renderer: str,
             raise ValueError("Missing raster CPU versus wall-time profiling samples")
         if not gpu and phase["phase"] != "idle" and peer_count < 2:
             raise ValueError("No measured Android native window paints")
-        if phase["peerTiledFrames"] != (0 if layered or renderer == "int-array" else peer_count):
+        if phase["peerTiledFrames"] != (0 if renderer == "int-array" else peer_count):
             raise ValueError("The requested native presentation path was not used")
         if phase["peerDirectFrames"] != (peer_count if direct else 0):
             raise ValueError(f"{phase['phase']} did not stay on the requested renderer "
                              f"({phase['peerDirectFrames']}/{peer_count} direct frames)")
         if direct and (phase["peerScrollTileFrames"] or phase["peerRetainedScrollFrames"]):
             raise ValueError("The direct timeline used moving bitmaps")
-        if phase["peerLayeredFrames"] != (peer_count if layered else 0):
-            raise ValueError(f"{phase['phase']} did not stay on the native window layers")
-        if layered and any(phase.get(metric, 0) for metric in
-                           ("peerMeanPixels", "peerMeanUpdatedTilePixels", "peerMeanReusedTilePixels")):
-            raise ValueError(f"{phase['phase']} updated a software backing bitmap")
-        if layered and phase["peerRecordedLayers"] > peer_count * 3:
-            raise ValueError(f"{phase['phase']} recorded more than the three window layers")
+        if phase["peerOptimizedFrames"] != (peer_count if optimized else 0):
+            raise ValueError(f"{phase['phase']} did not stay on the optimized Canvas")
+        if not optimized and phase.get("peerMeanSkippedChromePixels", 0):
+            raise ValueError(f"{phase['phase']} unexpectedly skipped uploads in the control")
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
         multi_raster = phase["peerMultiRasterFrames"]
@@ -140,6 +137,8 @@ def validate_result(result: dict, scene: str, renderer: str,
                 raise ValueError("Requested clip/empty scene was not actually loaded")
             if state.get("backend") != ("OpenGL" if gpu else "software"):
                 raise ValueError("The requested arranger backend did not become active")
+    if optimized and not any(p.get("peerMeanSkippedChromePixels", 0) for p in result["phases"]):
+        raise ValueError("The control textures never exercised the unchanged-pixel check")
     if phases[0]["before"]["scrollX"] == phases[0]["after"]["scrollX"]:
         raise ValueError("Pan did not move the production Viewport")
     if not reuse_horizontal_bitmaps and any(p.get("peerMeanReusedTilePixels", 0) for p in phases):
@@ -334,7 +333,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         variant = "legacy-split"
     if pan_replay != "normal":
         variant = pan_replay
-    if cold_scroll_replay and renderer not in DIRECT_RENDERERS:
+    if renderer in DIRECT_RENDERERS:
+        variant = renderer if pan_replay == "normal" else f"{renderer}-{pan_replay}"
+    elif cold_scroll_replay:
         variant = "cold-scroll-prepared" if prepare_edges else "cold-scroll-baseline"
     name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
@@ -362,6 +363,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     peak = False
     result = None
     phases = {}
+    windows = {}
     while time.monotonic() < deadline:
         log = dump_logcat("-v", "raw", "APEX_UI_BENCH:I", "*:S")
         if "READY " in log and ready is None:
@@ -377,6 +379,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
             if line.startswith("PHASE "):
                 phase = json.loads(line[len("PHASE "):])
                 phases[phase["phase"]] = phase
+            elif line.startswith("WINDOW "):
+                window = json.loads(line[len("WINDOW "):])
+                windows[window["phase"]] = window
             elif line.startswith("RESULT "):
                 result = json.loads(line[len("RESULT "):])
         if result is not None:
@@ -425,7 +430,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     if result is None:
         raise RuntimeError(f"{name}: no native runtime result within 100 seconds")
     expected = COLD_SCROLL_PHASES if cold_scroll_replay else PHASES
-    result["phases"] = [phases[key] for key in expected if key in phases]
+    if not all(key in phases and key in windows for key in expected):
+        raise ValueError(f"{name}: incomplete gesture or Android window metrics")
+    result["phases"] = [dict(phases[key], **windows[key]) for key in expected]
     if (result.get("pan_replay") != pan_replay
             or result.get("cold_scroll_replay") != cold_scroll_replay
             or result.get("prepare_edges") != prepare_edges):
@@ -480,14 +487,14 @@ def main() -> int:
     results = []
     failures = []
     try:
-        # Replay the same gestures in 9.9.7 and the native window renderer
+        # Replay the same gestures in 9.9.7 and the optimized Canvas
         # using one APK. Alternate the order and repeat the empty project.
         scenes = (("empty", 1, False), ("clip", 1, True), ("playback", 1, False),
                   ("recording", 1, True), ("empty", 2, True), ("deep", 1, False))
-        for scene, repeat, layered_first in scenes:
-            for layered in (layered_first, not layered_first):
+        for scene, repeat, optimized_first in scenes:
+            for optimized in (optimized_first, not optimized_first):
                 cold = scene != "deep"
-                renderer = "layered-canvas" if layered else "direct-canvas"
+                renderer = "optimized-canvas" if optimized else "direct-canvas"
                 name = f"{scene}-{renderer}-{repeat}"
                 try:
                     result = run_case(args.output, renderer, scene, repeat,
@@ -549,18 +556,18 @@ def main() -> int:
                  if r["scene"] == scene and r["repeat"] == repeat}
         if len(cases) != 2:
             continue
-        for baseline, layered in zip(cases["direct-canvas"]["phases"], cases["layered-canvas"]["phases"]):
+        for baseline, optimized in zip(cases["direct-canvas"]["phases"], cases["optimized-canvas"]["phases"]):
             if baseline["phase"] not in ("pan", "revisit", "post-x-pan", "post-y-pan", "pinch", "vertical-pinch"):
                 continue
-            print(f"[NATIVE-WINDOW-A/B] {scene} repeat={repeat} {layered['phase']} "
-                  f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{layered['ui_interval_p95_ms']:.1f} ms "
-                  f"worst={baseline['ui_interval_worst_ms']:.1f}/{layered['ui_interval_worst_ms']:.1f} ms "
-                  f"whole frame p95={baseline['windowTotalMs']['p95']:.1f}/{layered['windowTotalMs']['p95']:.1f} ms "
+            print(f"[CANVAS-A/B] {scene} repeat={repeat} {optimized['phase']} "
+                  f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{optimized['ui_interval_p95_ms']:.1f} ms "
+                  f"worst={baseline['ui_interval_worst_ms']:.1f}/{optimized['ui_interval_worst_ms']:.1f} ms "
+                  f"whole frame p95={baseline['windowTotalMs']['p95']:.1f}/{optimized['windowTotalMs']['p95']:.1f} ms "
                   f"deadlines missed={baseline['windowMissedDeadlines']}/{baseline['windowKnownDeadlines']}"
-                  f" → {layered['windowMissedDeadlines']}/{layered['windowKnownDeadlines']} "
-                  f"peer CPU p95={baseline['peerCpuMs']['p95']:.1f}/{layered['peerCpuMs']['p95']:.1f} ms "
-                  f"software px/frame={baseline.get('peerMeanPixels', 0):,}/{layered.get('peerMeanPixels', 0):,} "
-                  f"layers recorded={layered['peerRecordedLayers']}/{layered['peerLayeredFrames'] * 3}", flush=True)
+                  f" → {optimized['windowMissedDeadlines']}/{optimized['windowKnownDeadlines']} "
+                  f"peer CPU p95={baseline['peerCpuMs']['p95']:.1f}/{optimized['peerCpuMs']['p95']:.1f} ms "
+                  f"software px/frame={baseline.get('peerMeanPixels', 0):,}/{optimized.get('peerMeanPixels', 0):,} "
+                  f"unchanged chrome px/frame={optimized.get('peerMeanSkippedChromePixels', 0):,}", flush=True)
     # This job validates gesture correctness, NOT 60fps presentation.
     # The x86_64 SwiftShader emulator reports Choreographer callback spacing,
     # not SurfaceFlinger-presented frame intervals. Report misses explicitly

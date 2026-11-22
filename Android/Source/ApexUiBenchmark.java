@@ -58,7 +58,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                                                  boolean retainTranslatedTimeline, boolean legacyFullTreeRaster,
                                                  boolean slowPanReplay, boolean legacyHorizontalFilter,
                                                  boolean prepareViewport, boolean directCanvas,
-                                                 boolean layeredCanvas);
+                                                 boolean optimizedCanvas);
     private static native long[] nativeWindowDrawSamples(boolean finish);
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
@@ -90,8 +90,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             fail(new IllegalStateException("No real visible timeline body"));
             return;
         }
-        final boolean layeredCanvas = "layered-canvas".equals(renderer);
-        final boolean directCanvas = layeredCanvas || "direct-canvas".equals(renderer);
+        final boolean optimizedCanvas = "optimized-canvas".equals(renderer);
+        final boolean directCanvas = optimizedCanvas || "direct-canvas".equals(renderer);
         nativeUseFrameTiles(!"int-array".equals(renderer), "tiles".equals(renderer),
             directCanvas || "frame-paced".equals(renderer),
             activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false),
@@ -100,7 +100,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             activity.getIntent().getBooleanExtra("apex_retain_translated_timeline", false),
             activity.getIntent().getBooleanExtra("apex_legacy_full_tree_raster", false),
             slowPanReplay, "threshold-filter".equals(panReplay), prepareEdges,
-            directCanvas, layeredCanvas);
+            directCanvas, optimizedCanvas);
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
@@ -289,13 +289,17 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                         }
                     }
                     JSONObject entry = phases.getJSONObject(i);
-                    entry.put("windowDrawMs", summarize(draw, count));
-                    entry.put("windowTotalMs", summarize(total, count));
-                    entry.put("windowGpuMs", summarize(gpu, gpuCount));
-                    entry.put("windowKnownDeadlines", knownDeadlines);
-                    entry.put("windowMissedDeadlines", missedDeadlines);
-                    // Log one phase per record to stay below logcat's entry limit.
+                    // Android truncates individual logcat records around 4 KiB.
+                    // Keep window timings separate from native gesture state.
+                    JSONObject windowMetrics = new JSONObject();
+                    windowMetrics.put("phase", entry.getString("phase"));
+                    windowMetrics.put("windowDrawMs", summarize(draw, count));
+                    windowMetrics.put("windowTotalMs", summarize(total, count));
+                    windowMetrics.put("windowGpuMs", summarize(gpu, gpuCount));
+                    windowMetrics.put("windowKnownDeadlines", knownDeadlines);
+                    windowMetrics.put("windowMissedDeadlines", missedDeadlines);
                     Log.i(TAG, "PHASE " + entry);
+                    Log.i(TAG, "WINDOW " + windowMetrics);
                 }
             }
             JSONObject result = new JSONObject();
@@ -333,8 +337,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         final long[] rasterWait = new long[count];
         final long[] transfer = new long[count];
         int tiledFrames = 0;
-        int reducedTimelineFrames = 0, scrollTileFrames = 0, directFrames = 0, layeredFrames = 0;
-        long recordedLayers = 0;
+        int reducedTimelineFrames = 0, scrollTileFrames = 0, directFrames = 0, optimizedFrames = 0;
+        long skippedChromePixels = 0;
         long paintedPixels = 0, updatedTilePixels = 0, reusedTilePixels = 0;
         int retainedScrollFrames = 0, multiRasterFrames = 0;
         long retainedScrollPixels = 0;
@@ -353,12 +357,12 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             if (retained > 0) ++retainedScrollFrames;
             retainedScrollPixels += retained;
             if (samples[start + 9] > 1) ++multiRasterFrames;
-            if (samples[start + 4] != 0 && samples[start + 4] != 5) ++tiledFrames;
+            if (samples[start + 4] != 0) ++tiledFrames;
             if (samples[start + 4] == 2) ++reducedTimelineFrames;
             if (samples[start + 4] == 3) ++scrollTileFrames;
             if (samples[start + 4] >= 4) ++directFrames;
-            if (samples[start + 4] == 5) ++layeredFrames;
-            recordedLayers += samples[start + 10];
+            if (samples[start + 4] == 5) ++optimizedFrames;
+            skippedChromePixels += samples[start + 10];
         }
         entry.put("peerWallMs", summarize(wall, count));
         entry.put("peerCpuMs", summarize(cpu, count));
@@ -371,12 +375,12 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         entry.put("peerReducedTimelineFrames", reducedTimelineFrames);
         entry.put("peerScrollTileFrames", scrollTileFrames);
         entry.put("peerDirectFrames", directFrames);
-        entry.put("peerLayeredFrames", layeredFrames);
-        entry.put("peerRecordedLayers", recordedLayers);
+        entry.put("peerOptimizedFrames", optimizedFrames);
         entry.put("peerMultiRasterFrames", multiRasterFrames);
         entry.put("peerRetainedScrollFrames", retainedScrollFrames);
         entry.put("peerRetainedScrollPixels", retainedScrollPixels);
         if (count != 0) {
+            entry.put("peerMeanSkippedChromePixels", skippedChromePixels / count);
             entry.put("peerMeanPixels", paintedPixels / count);
             entry.put("peerMeanUpdatedTilePixels", updatedTilePixels / count);
             entry.put("peerMeanReusedTilePixels", reusedTilePixels / count);

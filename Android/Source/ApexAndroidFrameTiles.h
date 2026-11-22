@@ -27,6 +27,7 @@ DECLARE_JNI_CLASS (TileBitmap, "android/graphics/Bitmap")
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
     METHOD (drawBitmap, "drawBitmap", "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V") \
+    METHOD (drawBitmapRect, "drawBitmap", "(Landroid/graphics/Bitmap;Landroid/graphics/Rect;Landroid/graphics/Rect;Landroid/graphics/Paint;)V") \
     METHOD (getWidth, "getWidth", "()I") \
     METHOD (getHeight, "getHeight", "()I") \
     METHOD (isHardwareAccelerated, "isHardwareAccelerated", "()Z") \
@@ -39,22 +40,13 @@ DECLARE_JNI_CLASS (TileCanvas, "android/graphics/Canvas")
 #undef JNI_CLASS_MEMBERS
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
+    METHOD (set, "set", "(IIII)V")
+DECLARE_JNI_CLASS (TileCropRect, "android/graphics/Rect")
+#undef JNI_CLASS_MEMBERS
+
+#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
     METHOD (construct, "<init>", "(I)V")
 DECLARE_JNI_CLASS (TilePaint, "android/graphics/Paint")
-#undef JNI_CLASS_MEMBERS
-
-#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
-    METHOD (construct, "<init>", "(Ljava/lang/String;)V") \
-    METHOD (setPosition, "setPosition", "(IIII)Z") \
-    METHOD (begin, "beginRecording", "(II)Landroid/graphics/RecordingCanvas;") \
-    METHOD (end, "endRecording", "()V") \
-    METHOD (hasDisplayList, "hasDisplayList", "()Z")
-DECLARE_JNI_CLASS_WITH_MIN_SDK (WindowRenderNode, "android/graphics/RenderNode", 29)
-#undef JNI_CLASS_MEMBERS
-
-#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
-    METHOD (drawRenderNode, "drawRenderNode", "(Landroid/graphics/RenderNode;)V")
-DECLARE_JNI_CLASS_WITH_MIN_SDK (LayerCanvas, "android/graphics/Canvas", 29)
 #undef JNI_CLASS_MEMBERS
 
 // Android's bitmap storage and JUCE's Android SoftwareImageType use the
@@ -70,7 +62,7 @@ static bool horizontalBitmapReuse = false;
 static bool preciseArrangerDamage = false;
 static bool retainTranslatedTimeline = false;
 static bool directTimelineCanvas = false;
-static bool layeredWindowCanvas = false;
+static bool fastDirectCanvas = false;
 static bool benchmarkLegacyFullTreeRaster = false;
 static bool benchmarkSlowPanReplay = false;
 static bool benchmarkLegacyHorizontalFilter = false;
@@ -92,7 +84,7 @@ static constexpr bool preciseArrangerDamage = true;
    #endif
 static constexpr bool benchmarkSuppressMasterPreview = false;
 static constexpr bool retainTranslatedTimeline = horizontalBitmapReuse;
-static constexpr bool layeredWindowCanvas = directTimelineCanvas;
+static constexpr bool fastDirectCanvas = directTimelineCanvas;
 // The matched emulator replay showed longer frame delays with this layer.
 static constexpr bool reduceTimelineMotion = false;
 #endif
@@ -355,22 +347,22 @@ public:
     void invalidate() noexcept { frameBounds = {}; }
 
     bool needsReset(Rectangle<int> clip, float scale, bool opaque,
-                    Rectangle<int> scrollArea = {}) const noexcept
+                    Rectangle<int> scrollArea = {}, bool compareChrome = false) const noexcept
     {
         return frameBounds != clip || frameScale != scale || frameOpaque != opaque
-            || scrollArea != frameScrollArea;
+            || scrollArea != frameScrollArea || compareChrome != comparesChrome;
     }
 
     template <typename Raster>
     bool update(JNIEnv* env, Rectangle<int> clip, float scale, bool opaque,
                 RectangleList<int> redraw, Raster&& raster, HorizontalTileScroll scroll = {},
-                const HorizontalMoveDamage& moves = {})
+                const HorizontalMoveDamage& moves = {}, bool compareChrome = false)
     {
        #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-        updatedTilePixels = reusedTilePixels = retainedScrollPixels = 0;
+        updatedTilePixels = reusedTilePixels = retainedScrollPixels = skippedChromePixels = 0;
        #endif
-        const bool reset = needsReset(clip, scale, opaque, scroll.area);
-        if (reset && !resetFrame(env, clip, scale, opaque, scroll.area))
+        const bool reset = needsReset(clip, scale, opaque, scroll.area, compareChrome);
+        if (reset && !resetFrame(env, clip, scale, opaque, scroll.area, compareChrome))
             return false;
 
         const auto delta = snapDeviceX(scroll.contentOrigin.x, scale)
@@ -482,7 +474,7 @@ public:
            #endif
             for (auto& tile : tiles)
             {
-                const bool movable = !tile.shadow.empty();
+                const bool movable = tile.movable;
                 const auto& parts = movable ? scrollParts : fixedParts;
                 const bool touched = parts[0].rects->intersectsRectangle(tile.bounds)
                     || (movable && wrapped.intersectsRectangle(tile.bounds));
@@ -495,6 +487,22 @@ public:
                     reusedTilePixels += tile.bounds.getWidth() * tile.bounds.getHeight();
                    #endif
                     continue;
+                }
+                if (comparesChrome && !movable)
+                {
+                    // A dirty border/ruler request can overlap chrome that
+                    // actually painted the same bytes. Avoid locking and
+                    // invalidating its Android texture in that case.
+                    if (!reset && !tile.shadow.empty() && matchesShadow(tile, source, parts))
+                    {
+                       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                        skippedChromePixels += tile.bounds.getWidth() * tile.bounds.getHeight();
+                       #endif
+                        continue;
+                    }
+                    if (tile.shadow.empty())
+                        tile.shadow.resize(static_cast<std::size_t>(tile.bounds.getWidth())
+                                           * tile.bounds.getHeight() * sizeof(PixelARGB));
                 }
                 if (!upload(env, tile, source, parts))
                     return false;
@@ -531,7 +539,7 @@ public:
     }
 
    #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-    int updatedTilePixels = 0, reusedTilePixels = 0, retainedScrollPixels = 0;
+    int updatedTilePixels = 0, reusedTilePixels = 0, retainedScrollPixels = 0, skippedChromePixels = 0;
     bool hasScrollTiles() const noexcept { return !frameScrollArea.isEmpty(); }
    #endif
 
@@ -561,26 +569,47 @@ public:
         int submittedTiles = 0;
         int64_t submittedPixels = 0;
        #endif
-        const auto submit = [&] (const Tile& tile, Point<int> position)
+        const auto submit = [&] (const Tile& tile, Point<int> position, Rectangle<int> visible = {})
         {
-            env->CallVoidMethod(canvas, TileCanvas.drawBitmap, tile.bitmap.get(),
-                                (jfloat)position.x, (jfloat)position.y, filteredPaint.get());
+            if (visible.isEmpty())
+                env->CallVoidMethod(canvas, TileCanvas.drawBitmap, tile.bitmap.get(),
+                                    (jfloat)position.x, (jfloat)position.y, filteredPaint.get());
+            else
+            {
+                const auto source = visible - position;
+                env->CallVoidMethod(cropSource.get(), TileCropRect.set, source.getX(), source.getY(),
+                                    source.getRight(), source.getBottom());
+                env->CallVoidMethod(cropTarget.get(), TileCropRect.set, visible.getX(), visible.getY(),
+                                    visible.getRight(), visible.getBottom());
+                env->CallVoidMethod(canvas, TileCanvas.drawBitmapRect, tile.bitmap.get(),
+                                    cropSource.get(), cropTarget.get(), filteredPaint.get());
+            }
            #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             if (sampleDraw)
             {
                 ++submittedTiles;
-                submittedPixels += static_cast<int64_t>(tile.bounds.getWidth())
-                                   * tile.bounds.getHeight() * pixelDivisor * pixelDivisor;
+                const auto bounds = visible.isEmpty() ? tile.bounds * pixelDivisor : visible;
+                submittedPixels += static_cast<int64_t>(bounds.getWidth()) * bounds.getHeight();
             }
            #endif
         };
         for (const auto& tile : tiles)
         {
-            if (!tile.shadow.empty())
+            if (tile.movable)
                 continue;
             const auto surfaceTile = tile.bounds * pixelDivisor + frameBounds.getPosition();
-            if (clip.intersects(surfaceTile) && !covered.contains(surfaceTile))
-                submit(tile, origin + tile.bounds.getPosition());
+            if (!clip.intersects(surfaceTile) || covered.contains(surfaceTile))
+                continue;
+            const auto position = origin + tile.bounds.getPosition();
+            if (comparesChrome && covered.intersects(surfaceTile))
+            {
+                RectangleList<int> exposed(surfaceTile.getIntersection(clip));
+                exposed.subtract(covered);
+                for (const auto& rect : exposed)
+                    submit(tile, position, rect);
+            }
+            else
+                submit(tile, position);
         }
         const auto scrollClip = clip.getIntersection(frameScrollArea);
         if (!scrollClip.isEmpty())
@@ -592,7 +621,7 @@ public:
             const int width = frameScrollArea.getWidth();
             for (const auto& tile : tiles)
             {
-                if (tile.shadow.empty())
+                if (!tile.movable)
                     continue;
                 const auto screen = tile.bounds + origin - Point<int>(frameScrollOffset, 0);
                 for (const int shift : { 0, width })
@@ -632,6 +661,7 @@ private:
         Rectangle<int> bounds;
         GlobalRef bitmap;
         std::size_t stride;
+        bool movable;
         std::vector<uint8> shadow;
     };
 
@@ -644,7 +674,7 @@ private:
     int smallerDimension(int size) const noexcept { return (size + pixelDivisor - 1) / pixelDivisor; }
 
     bool resetFrame(JNIEnv* env, Rectangle<int> clip, float scale, bool opaque,
-                    Rectangle<int> scrollArea)
+                    Rectangle<int> scrollArea, bool compareChrome)
     {
         // The 256px experiment increased raster wall times and worsened
         // playback Choreographer p95 vs. the 384px baseline. Retain the
@@ -660,6 +690,17 @@ private:
         if (config == nullptr)
             return clearFailure(env);
 
+        if (compareChrome && cropSource.get() == nullptr)
+        {
+            cropSource = GlobalRef(LocalRef<jobject>(env->NewObject(AndroidRect, AndroidRect.constructor, 0, 0, 0, 0)));
+            cropTarget = GlobalRef(LocalRef<jobject>(env->NewObject(AndroidRect, AndroidRect.constructor, 0, 0, 0, 0)));
+            if (cropSource.get() == nullptr || cropTarget.get() == nullptr)
+            {
+                cropSource.clear();
+                cropTarget.clear();
+                return clearFailure(env);
+            }
+        }
         if (pixelDivisor != 1 && filteredPaint.get() == nullptr)
         {
             constexpr jint filterBitmapFlag = 2;
@@ -693,7 +734,7 @@ private:
                     GlobalRef ref(bitmap, env);
                     if (ref.get() == nullptr)
                         return clearFailure(env);
-                    Tile tile { { x, y, w, h }, std::move(ref), info.stride, {} };
+                    Tile tile { { x, y, w, h }, std::move(ref), info.stride, movable, {} };
                     if (movable)
                         tile.shadow.resize(static_cast<std::size_t>(w) * h * sizeof(PixelARGB));
                     next.push_back(std::move(tile));
@@ -716,6 +757,7 @@ private:
         frameScrollArea = scrollArea;
         frameScale = scale;
         frameOpaque = opaque;
+        comparesChrome = compareChrome;
         return true;
     }
 
@@ -786,7 +828,7 @@ private:
     }
 
     const int pixelDivisor;
-    GlobalRef filteredPaint;
+    GlobalRef filteredPaint, cropSource, cropTarget;
     Image backing;
     std::vector<Tile> tiles;
     Rectangle<int> frameBounds, frameScrollArea;
@@ -794,116 +836,11 @@ private:
     int frameScrollOffset = 0;
     float frameScale = 0.0f;
     bool frameOpaque = false;
+    bool comparesChrome = false;
    #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
     uint32_t scrollProbeEpoch = 0;
     int scrollProbeSamples = 0;
    #endif
-};
-
-class NativeWindowLayers
-{
-public:
-    void invalidate() noexcept
-    {
-        for (auto& layer : layers)
-            layer.bounds = {};
-    }
-
-    // These display lists belong to fixed window areas. The editor band
-    // includes the track headers and arranger so each gesture records them
-    // together once. Top and bottom controls reuse their lists until dirty.
-    template <typename PaintCanvas>
-    bool paint(JNIEnv* env, jobject target, Rectangle<int> surface, Rectangle<int> timeline,
-               float scale, const RectangleList<int>& dirty, PaintCanvas& paintCanvas)
-    {
-        if (lastScale != scale)
-        {
-            invalidate();
-            lastScale = scale;
-        }
-
-        const int top = timeline.getY();
-        const int bottom = timeline.getBottom();
-        const std::array<Rectangle<int>, 3> areas {
-            surface.withHeight(top),
-            surface.withTop(top).withBottom(bottom),
-            surface.withTrimmedTop(bottom)
-        };
-
-        recordedLayers = 0;
-        for (size_t i = 0; i < layers.size(); ++i)
-        {
-            auto& layer = layers[i];
-            const auto area = areas[i];
-            if (area.isEmpty())
-            {
-                layer.bounds = {};
-                continue;
-            }
-            if (area != layer.bounds || dirty.intersectsRectangle(area)
-                || env->CallBooleanMethod(layer.node.get(), WindowRenderNode.hasDisplayList) != JNI_TRUE)
-            {
-                if (!record(env, layer, area, paintCanvas))
-                    return fail(env);
-                ++recordedLayers;
-            }
-        }
-
-        for (const auto& layer : layers)
-            if (!layer.bounds.isEmpty())
-                env->CallVoidMethod(target, LayerCanvas.drawRenderNode, layer.node.get());
-
-        if (env->ExceptionCheck())
-            return fail(env);
-        return true;
-    }
-
-    int recordedLayers = 0;
-
-private:
-    struct Layer
-    {
-        Rectangle<int> bounds;
-        GlobalRef node;
-    };
-
-    template <typename PaintCanvas>
-    bool record(JNIEnv* env, Layer& layer, Rectangle<int> bounds, PaintCanvas& paintCanvas)
-    {
-        if (layer.node.get() == nullptr)
-        {
-            LocalRef<jobject> node(env->NewObject(WindowRenderNode, WindowRenderNode.construct, nullptr));
-            if (node == nullptr)
-                return false;
-            layer.node = GlobalRef(node);
-        }
-        auto node = layer.node.get();
-        env->CallBooleanMethod(node, WindowRenderNode.setPosition, bounds.getX(), bounds.getY(),
-                               bounds.getRight(), bounds.getBottom());
-        LocalRef<jobject> recording(env->CallObjectMethod(node, WindowRenderNode.begin,
-                                                         bounds.getWidth(), bounds.getHeight()));
-        if (recording == nullptr)
-            return false;
-        const bool painted = paintCanvas(recording.get(), bounds, bounds.getPosition());
-        // Always finish an opened recording, even if a JUCE operation asked
-        // for software fallback. The failed list is never presented.
-        env->CallVoidMethod(node, WindowRenderNode.end);
-        if (!painted || env->ExceptionCheck())
-            return false;
-        layer.bounds = bounds;
-        return true;
-    }
-
-    bool fail(JNIEnv* env) noexcept
-    {
-        if (env->ExceptionCheck())
-            env->ExceptionClear();
-        invalidate();
-        return false;
-    }
-
-    std::array<Layer, 3> layers;
-    float lastScale = 0.0f;
 };
 
 class FrameTiles final : private Timer
@@ -946,8 +883,6 @@ public:
         damage->viewInvalidated = false;
         nativeTiles.invalidate();
         motionTiles.invalidate();
-        nativeWindow.invalidate();
-        drewNativeWindow = false;
         drawnMotionArea = {};
         drawnDirectArea = {};
     }
@@ -975,37 +910,9 @@ public:
         if (!surface.intersects(clip))
             return false;
         const bool hardwareCanvas = env->CallBooleanMethod(canvas, TileCanvas.isHardwareAccelerated) == JNI_TRUE;
-        const auto visibleTimeline = hardwareCanvas && opaque && directTimelineCanvas
-            ? directTimelineArea(root, surface, scale) : Rectangle<int>{};
-        auto redraw = std::exchange(damage->pending, {});
-        auto moves = std::exchange(damage->horizontalMoves, {});
-       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-        damage->logAndReset(surface, clip, redraw);
-       #endif
-        const auto drawDirect = [&] (jobject target, Rectangle<int> area, Point<int> origin)
-        {
-            return paintCanvas(canvasResources, target, area, origin);
-        };
-
-        if (layeredWindowCanvas && !visibleTimeline.isEmpty() && getAndroidSDKVersion() >= 29
-            && nativeWindow.paint(env, canvas, surface, visibleTimeline, scale, redraw, drawDirect))
-        {
-            if (!drewNativeWindow)
-                nativeTiles.invalidate();
-            drewNativeWindow = true;
-            drawnDirectArea = visibleTimeline;
-            drawnMotionArea = {};
-            damage->hardwareCanvas = framePacingEnabled;
-            return true;
-        }
-        if (drewNativeWindow)
-        {
-            nativeWindow.invalidate();
-            drewNativeWindow = false;
-        }
         const auto scroll = hardwareCanvas && opaque && !reduceTimelineMotion && !directTimelineCanvas
             ? timelineScroll(root, surface, scale) : HorizontalTileScroll{};
-        const bool initialOrResized = nativeTiles.needsReset(surface, scale, opaque, scroll.area);
+        const bool initialOrResized = nativeTiles.needsReset(surface, scale, opaque, scroll.area, fastDirectCanvas);
        #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         if (initialOrResized)
             __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
@@ -1021,15 +928,22 @@ public:
             motionArea = (root.getLocalArea(viewport, viewport->getLocalBounds()).toFloat() * scale)
                 .getSmallestIntegerContainer().getIntersection(clip);
 
+        auto redraw = std::exchange(damage->pending, {});
+        auto moves = std::exchange(damage->horizontalMoves, {});
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        damage->logAndReset(surface, clip, redraw);
+       #endif
         if (initialOrResized)
             redraw.add(surface);
 
         // The direct layer is the same on-screen rectangle at every world X.
         // Let the real component tree render into the hardware Canvas. Paint
         // the software chrome around it, outside the same rectangle.
-        const auto candidate = visibleTimeline.getIntersection(clip);
+        const auto candidate = hardwareCanvas && opaque && directTimelineCanvas
+            ? directTimelineArea(root, surface, scale).getIntersection(clip) : Rectangle<int>{};
+        canvasResources.useNativeShapes = fastDirectCanvas;
         auto directArea = candidate;
-        if (!candidate.isEmpty() && !drawDirect(canvas, candidate, {}))
+        if (!candidate.isEmpty() && !paintCanvas(canvasResources, candidate))
         {
             // A complex overlay may request an unsupported operation. The
             // opaque software draw below overwrites the incomplete recording
@@ -1088,18 +1002,24 @@ public:
             const ScopedValueSetter<TimelineRasterOrigin> useAlignedOrigin(timelineRasterOrigin, aligned);
             raster(frame, regions, origin, divisor);
         };
-        if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), rasterTimeline, scroll, moves))
+        if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw),
+                                rasterTimeline, scroll, moves, fastDirectCanvas))
             return false;
 
         damage->hardwareCanvas = framePacingEnabled && hardwareCanvas;
         if (!directArea.isEmpty())
         {
-            const auto save = env->CallIntMethod(canvas, DirectCanvas.save);
-            const auto r = directArea.toFloat();
-            env->CallBooleanMethod(canvas, DirectCanvas.clipOutRect, r.getX(), r.getY(),
-                                   r.getRight(), r.getBottom());
-            nativeTiles.draw(env, canvas, clip, directArea);
-            env->CallVoidMethod(canvas, DirectCanvas.restore, save);
+            if (fastDirectCanvas)
+                nativeTiles.draw(env, canvas, clip, directArea);
+            else
+            {
+                const auto save = env->CallIntMethod(canvas, DirectCanvas.save);
+                const auto r = directArea.toFloat();
+                env->CallBooleanMethod(canvas, DirectCanvas.clipOutRect, r.getX(), r.getY(),
+                                       r.getRight(), r.getBottom());
+                nativeTiles.draw(env, canvas, clip, directArea);
+                env->CallVoidMethod(canvas, DirectCanvas.restore, save);
+            }
         }
         else
             nativeTiles.draw(env, canvas, clip, motionArea);
@@ -1113,16 +1033,14 @@ public:
     bool drawsMotionLayer() const noexcept { return !drawnMotionArea.isEmpty(); }
     bool drawsDirectTimeline() const noexcept { return !drawnDirectArea.isEmpty(); }
    #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-    bool drawsNativeWindow() const noexcept { return drewNativeWindow; }
-    int getRecordedLayers() const noexcept { return drewNativeWindow ? nativeWindow.recordedLayers : 0; }
     int getUpdatedTilePixels() const noexcept
     {
-        return drewNativeWindow ? 0
-            : nativeTiles.updatedTilePixels + (drawsMotionLayer() ? motionTiles.updatedTilePixels : 0);
+        return nativeTiles.updatedTilePixels + (drawsMotionLayer() ? motionTiles.updatedTilePixels : 0);
     }
-    int getReusedTilePixels() const noexcept { return drewNativeWindow ? 0 : nativeTiles.reusedTilePixels; }
-    int getRetainedScrollPixels() const noexcept { return drewNativeWindow ? 0 : nativeTiles.retainedScrollPixels; }
-    bool drawsScrollTiles() const noexcept { return !drewNativeWindow && nativeTiles.hasScrollTiles(); }
+    int getReusedTilePixels() const noexcept { return nativeTiles.reusedTilePixels; }
+    int getRetainedScrollPixels() const noexcept { return nativeTiles.retainedScrollPixels; }
+    int getSkippedChromePixels() const noexcept { return nativeTiles.skippedChromePixels; }
+    bool drawsScrollTiles() const noexcept { return nativeTiles.hasScrollTiles(); }
    #endif
 
 private:
@@ -1264,8 +1182,6 @@ private:
     uint32 lastMotionMs = 0;
     Rectangle<int> drawnMotionArea, drawnDirectArea;
     CanvasGraphics::Resources canvasResources;
-    NativeWindowLayers nativeWindow;
-    bool drewNativeWindow = false;
 };
 
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
@@ -1274,7 +1190,7 @@ struct FrameSample
     jlong wallNs = 0, cpuNs = 0, rasterNs = 0, pixels = 0, usedTiles = 0;
     jlong rasterCpuNs = 0;
     jlong updatedTilePixels = 0, reusedTilePixels = 0, retainedScrollPixels = 0;
-    jlong rasterPasses = 0, recordedLayers = 0;
+    jlong rasterPasses = 0, skippedChromePixels = 0;
 };
 static std::array<FrameSample, 2048> recordedFrames {};
 static std::size_t frameCount = 0;
@@ -1475,12 +1391,12 @@ public:
     {
         if (record)
         {
-            sample.usedTiles = tiles.drawsNativeWindow() ? 5 : (tiles.drawsDirectTimeline() ? 4
-                : (tiles.drawsMotionLayer() ? 2 : (tiles.drawsScrollTiles() ? 3 : 1)));
-            sample.recordedLayers = tiles.getRecordedLayers();
+            sample.usedTiles = tiles.drawsDirectTimeline() ? (fastDirectCanvas ? 5 : 4)
+                : (tiles.drawsMotionLayer() ? 2 : (tiles.drawsScrollTiles() ? 3 : 1));
             sample.updatedTilePixels = tiles.getUpdatedTilePixels();
             sample.reusedTilePixels = tiles.getReusedTilePixels();
             sample.retainedScrollPixels = tiles.getRetainedScrollPixels();
+            sample.skippedChromePixels = tiles.getSkippedChromePixels();
         }
     }
 
@@ -1531,7 +1447,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage,
     jboolean retainTranslation, jboolean legacyFullTreeRaster,
     jboolean slowPanReplay, jboolean legacyHorizontalFilter, jboolean prepareViewport,
-    jboolean directCanvas, jboolean layeredCanvas)
+    jboolean directCanvas, jboolean optimizedCanvas)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
@@ -1545,7 +1461,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     juce::apexAndroidFrame::benchmarkLegacyHorizontalFilter = legacyHorizontalFilter == JNI_TRUE;
     juce::apexAndroidFrame::benchmarkViewportPreparation = prepareViewport == JNI_TRUE;
     juce::apexAndroidFrame::directTimelineCanvas = directCanvas == JNI_TRUE;
-    juce::apexAndroidFrame::layeredWindowCanvas = layeredCanvas == JNI_TRUE;
+    juce::apexAndroidFrame::fastDirectCanvas = optimizedCanvas == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
@@ -1578,7 +1494,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
         values.insert(values.end(), { f.wallNs, f.cpuNs, f.rasterNs, f.pixels,
                                       f.usedTiles, f.rasterCpuNs, f.updatedTilePixels,
                                       f.reusedTilePixels, f.retainedScrollPixels, f.rasterPasses,
-                                      f.recordedLayers });
+                                      f.skippedChromePixels });
     }
     const auto count = (jsize)values.size();
     auto result = env->NewLongArray(count);

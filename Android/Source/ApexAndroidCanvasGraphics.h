@@ -23,6 +23,9 @@ namespace juce::apexAndroidFrame
     METHOD (clipPath, "clipPath", "(Landroid/graphics/Path;)Z") \
     METHOD (getClipBounds, "getClipBounds", "(Landroid/graphics/Rect;)Z") \
     METHOD (drawRect, "drawRect", "(FFFFLandroid/graphics/Paint;)V") \
+    METHOD (drawRoundRect, "drawRoundRect", "(FFFFFFLandroid/graphics/Paint;)V") \
+    METHOD (drawOval, "drawOval", "(FFFFLandroid/graphics/Paint;)V") \
+    METHOD (drawLine, "drawLine", "(FFFFLandroid/graphics/Paint;)V") \
     METHOD (drawLines, "drawLines", "([FIILandroid/graphics/Paint;)V") \
     METHOD (drawPath, "drawPath", "(Landroid/graphics/Path;Landroid/graphics/Paint;)V") \
     METHOD (drawBitmap, "drawBitmap", "(Landroid/graphics/Bitmap;Landroid/graphics/Matrix;Landroid/graphics/Paint;)V")
@@ -55,9 +58,16 @@ DECLARE_JNI_CLASS (DirectPathDirection, "android/graphics/Path$Direction")
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
     METHOD (strokeWidth, "setStrokeWidth", "(F)V") \
+    METHOD (style, "setStyle", "(Landroid/graphics/Paint$Style;)V") \
     METHOD (filterBitmap, "setFilterBitmap", "(Z)V") \
     METHOD (xfermode, "setXfermode", "(Landroid/graphics/Xfermode;)Landroid/graphics/Xfermode;")
 DECLARE_JNI_CLASS (DirectPaint, "android/graphics/Paint")
+#undef JNI_CLASS_MEMBERS
+
+#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
+    STATICFIELD (fill, "FILL", "Landroid/graphics/Paint$Style;") \
+    STATICFIELD (stroke, "STROKE", "Landroid/graphics/Paint$Style;")
+DECLARE_JNI_CLASS (DirectPaintStyle, "android/graphics/Paint$Style")
 #undef JNI_CLASS_MEMBERS
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
@@ -133,24 +143,29 @@ public:
             winding = GlobalRef(LocalRef<jobject>(env->GetStaticObjectField(DirectFillType, DirectFillType.winding)));
             evenOdd = GlobalRef(LocalRef<jobject>(env->GetStaticObjectField(DirectFillType, DirectFillType.evenOdd)));
             clamp = GlobalRef(LocalRef<jobject>(env->GetStaticObjectField(DirectTileMode, DirectTileMode.clamp)));
+            fillStyle = GlobalRef(LocalRef<jobject>(env->GetStaticObjectField(DirectPaintStyle, DirectPaintStyle.fill)));
+            strokeStyle = GlobalRef(LocalRef<jobject>(env->GetStaticObjectField(DirectPaintStyle, DirectPaintStyle.stroke)));
             LocalRef<jobject> src(env->GetStaticObjectField(DirectBlendMode, DirectBlendMode.src));
             srcBlend = GlobalRef(LocalRef<jobject>(env->NewObject(DirectSrcBlend, DirectSrcBlend.constructor, src.get())));
             ready = brush.get() && imagePaint.get() && path.get() && rect.get() && matrix.get()
                  && matrixValues.get() && lines.get() && clockwise.get() && winding.get()
-                 && evenOdd.get() && clamp.get() && srcBlend.get() && !env->ExceptionCheck();
+                 && evenOdd.get() && clamp.get() && srcBlend.get()
+                 && fillStyle.get() && strokeStyle.get() && !env->ExceptionCheck();
             return ready;
         }
 
         static constexpr int lineCapacity = 2048;
         GlobalRef brush, imagePaint, path, rect, matrix, matrixValues, lines;
         GlobalRef clockwise, winding, evenOdd, clamp, srcBlend;
+        GlobalRef fillStyle, strokeStyle;
         std::vector<Glyph> glyphs;
         std::vector<ColourGlyph> colourGlyphs;
         bool ready = false;
+        bool useNativeShapes = false;
     };
 
     CanvasGraphics(JNIEnv* envToUse, jobject target, Rectangle<int> clip,
-                   float scale, Resources& resources, Point<int> targetOrigin)
+                   float scale, Resources& resources)
         : env(envToUse), canvas(target), native(resources)
     {
         if (!native.initialise(env))
@@ -160,11 +175,9 @@ public:
         }
 
         outerSave = env->CallIntMethod(canvas, DirectCanvas.save);
-        if (targetOrigin != Point<int>{})
-            env->CallVoidMethod(canvas, DirectCanvas.translate, (float) -targetOrigin.x, (float) -targetOrigin.y);
         clipRectangle(clip.toFloat(), DirectCanvas.clipRect);
         env->CallVoidMethod(canvas, DirectCanvas.scale, scale, scale);
-        state.transform = AffineTransform::scale(scale).translated(-targetOrigin.toFloat());
+        state.transform = AffineTransform::scale(scale);
     }
 
     ~CanvasGraphics() override
@@ -371,6 +384,61 @@ public:
     }
 
     void drawLine(const Line<float>& line) override { drawLineWithThickness(line, 1.0f); }
+
+    void drawLineWithThickness(const Line<float>& line, float thickness) override
+    {
+        if (!native.useNativeShapes)
+        {
+            LowLevelGraphicsContext::drawLineWithThickness(line, thickness);
+            return;
+        }
+        if (thickness > 0.0f && line.getStart() != line.getEnd() && applyBrush())
+        {
+            env->CallVoidMethod(native.brush.get(), DirectPaint.strokeWidth, thickness);
+            env->CallVoidMethod(canvas, DirectCanvas.drawLine, line.getStartX(), line.getStartY(),
+                                line.getEndX(), line.getEndY(), native.brush.get());
+        }
+    }
+
+    void fillRoundedRectangle(const Rectangle<float>& bounds, float radius) override
+    {
+        if (!native.useNativeShapes)
+            LowLevelGraphicsContext::fillRoundedRectangle(bounds, radius);
+        else if (!bounds.isEmpty() && applyBrush())
+            drawRoundRect(bounds, radius);
+    }
+
+    void drawRoundedRectangle(const Rectangle<float>& bounds, float radius, float thickness) override
+    {
+        if (!native.useNativeShapes)
+            LowLevelGraphicsContext::drawRoundedRectangle(bounds, radius, thickness);
+        else if (!bounds.isEmpty() && thickness > 0.0f && applyBrush())
+        {
+            setStroke(thickness);
+            drawRoundRect(bounds, radius);
+            endStroke();
+        }
+    }
+
+    void fillEllipse(const Rectangle<float>& bounds) override
+    {
+        if (!native.useNativeShapes)
+            LowLevelGraphicsContext::fillEllipse(bounds);
+        else if (!bounds.isEmpty() && applyBrush())
+            drawOval(bounds);
+    }
+
+    void drawEllipse(const Rectangle<float>& bounds, float thickness) override
+    {
+        if (!native.useNativeShapes)
+            LowLevelGraphicsContext::drawEllipse(bounds, thickness);
+        else if (!bounds.isEmpty() && thickness > 0.0f && applyBrush())
+        {
+            setStroke(thickness);
+            drawOval(bounds);
+            endStroke();
+        }
+    }
 
     void drawImage(const Image& image, const AffineTransform& transform) override
     {
@@ -720,6 +788,30 @@ private:
     void drawRectangle(Rectangle<float> r)
     {
         env->CallVoidMethod(canvas, DirectCanvas.drawRect, r.getX(), r.getY(), r.getRight(),
+                            r.getBottom(), native.brush.get());
+    }
+
+    void setStroke(float thickness)
+    {
+        env->CallVoidMethod(native.brush.get(), DirectPaint.strokeWidth, thickness);
+        env->CallVoidMethod(native.brush.get(), DirectPaint.style, native.strokeStyle.get());
+    }
+
+    void endStroke()
+    {
+        env->CallVoidMethod(native.brush.get(), DirectPaint.style, native.fillStyle.get());
+    }
+
+    void drawRoundRect(Rectangle<float> r, float radius)
+    {
+        const auto corner = jlimit(0.0f, 0.5f * jmin(r.getWidth(), r.getHeight()), radius);
+        env->CallVoidMethod(canvas, DirectCanvas.drawRoundRect, r.getX(), r.getY(), r.getRight(),
+                            r.getBottom(), corner, corner, native.brush.get());
+    }
+
+    void drawOval(Rectangle<float> r)
+    {
+        env->CallVoidMethod(canvas, DirectCanvas.drawOval, r.getX(), r.getY(), r.getRight(),
                             r.getBottom(), native.brush.get());
     }
 
