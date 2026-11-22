@@ -308,7 +308,10 @@ static_assert(compactShortcutsDisappearBelowThreshold());
 // 268+ boundary may expose 44-unit transport targets.
 static_assert(compactAtThreshold.transport[0].height == 0
               && compactBelowThreshold.transport[0].height == 0);
-// Declared before the width-recovery constexpr assertion; implementation below.\nconstexpr bool exclusiveHitEdges(DAW::mobile::PortraitTransportLayout r);\n\n// Split-screen width transitions must never expose partial six-action rows.
+// Declared before the width-recovery constexpr assertion; implementation below.
+constexpr bool exclusiveHitEdges(DAW::mobile::PortraitTransportLayout r);
+
+// Split-screen width transitions must never expose partial six-action rows.
 // A resize from 268 to 267 and back must restore all six touch targets,
 // including at the minimum 44-unit deck height (IME/safe-area collapse).
 constexpr bool compactActionWidthRecovery()
@@ -495,7 +498,8 @@ constexpr bool exclusiveHitEdges(DAW::mobile::PortraitTransportLayout r)
     }
     return true;
 }
-static_assert(compactActionWidthRecovery());\nstatic_assert(exclusiveHitEdges(portraitTransportLayout(320, 144)));
+static_assert(compactActionWidthRecovery());
+static_assert(exclusiveHitEdges(portraitTransportLayout(320, 144)));
 static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(320, 112)));
 static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(852, 180)));
 
