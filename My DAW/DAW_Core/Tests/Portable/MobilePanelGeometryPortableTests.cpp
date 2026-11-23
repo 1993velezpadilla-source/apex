@@ -3641,3 +3641,31 @@ constexpr bool mixerToolbarExtremeDimensionsStayBounded = []() constexpr {
     return true;
 }();
 static_assert(mixerToolbarExtremeDimensionsStayBounded);
+
+
+// Phone FX Browser: a scrollbar must be reserved from CURRENT row overflow,
+// including exact-fit boundaries and extreme restored list sizes. This guards
+// portrait/landscape resize without touching plugin loading or desktop DSP.
+constexpr bool pluginBrowserScrollbarBoundaryRegression = []() constexpr {
+    using DAW::mobile::pluginBrowserListWidth;
+    constexpr int huge = std::numeric_limits<int>::max();
+    for (int viewportW : { 0, 1, 12, 44, 393, huge })
+        for (int viewportH : { 0, 1, 43, 44, 88, huge })
+            for (int rowHeight : { -1, 0, 1, 44, huge })
+                for (int rowCount : { -1, 0, 1, 2, 3, huge })
+                {
+                    const int width = pluginBrowserListWidth(
+                        viewportW, viewportH, rowCount, rowHeight, 12);
+                    if (width < 0 || width > viewportW)
+                        return false;
+                    const bool overflow = viewportW > 0 && viewportH > 0
+                        && rowCount > 0 && rowHeight > 0
+                        && rowCount > viewportH / rowHeight;
+                    const int expected = viewportW <= 0 || viewportH <= 0
+                        ? 0 : viewportW - (overflow ? (viewportW < 12 ? viewportW : 12) : 0);
+                    if (width != expected)
+                        return false;
+                }
+    return true;
+}();
+static_assert(pluginBrowserScrollbarBoundaryRegression);
