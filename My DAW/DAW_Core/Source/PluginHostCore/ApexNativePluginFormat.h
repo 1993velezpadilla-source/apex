@@ -9,6 +9,7 @@
 #include "../LimiterCore/ApexLimiterProcessor.h"
 #include "../DelayCore/ApexBubblegumDelayProcessor.h"
 #include "../ReverieCore/ApexReverieProcessor.h"
+#include "../TuneLiveCore/ApexTuneLiveProcessor.h"
 
 namespace DAW {
 
@@ -35,6 +36,20 @@ class ApexNativePluginFormat final : public juce::AudioPluginFormat
 {
 public:
     static constexpr const char* kFormatName = "APEX Native";
+
+    static juce::PluginDescription createTuneLiveDescription (
+        APEX::TuneLive::Processor::Engine engine = APEX::TuneLive::Processor::Engine::Studio)
+    {
+        return APEX::TuneLive::Processor::descriptionFor (engine);
+    }
+
+    static bool isTuneLiveDescription (const juce::PluginDescription& desc)
+    {
+        using Tune = APEX::TuneLive::Processor;
+        return desc.pluginFormatName.equalsIgnoreCase (kFormatName)
+            && ((desc.uniqueId == Tune::kUniqueId && desc.fileOrIdentifier == Tune::kFileOrIdentifier)
+                || (desc.uniqueId == Tune::kTrackingUniqueId && desc.fileOrIdentifier == Tune::kTrackingIdentifier));
+    }
 
     juce::String getName() const override { return kFormatName; }
 
@@ -67,6 +82,9 @@ public:
         APEX::Reverie::Processor reveriePrototype;
         reveriePrototype.fillInPluginDescription(reverie);
         results.add(new juce::PluginDescription(reverie));
+        results.add (new juce::PluginDescription (createTuneLiveDescription()));
+        results.add (new juce::PluginDescription (
+            createTuneLiveDescription (APEX::TuneLive::Processor::Engine::Tracking)));
     }
 
     /** The manager matches on getName() AND this predicate; accept every
@@ -81,7 +99,9 @@ public:
             || fileOrIdentifier == APEX::PrecisionC3::Processor::kFileOrIdentifier
             || fileOrIdentifier == APEX::Limiter::Processor::kFileOrIdentifier
             || fileOrIdentifier == APEX::Delay::Processor::kFileOrIdentifier
-            || fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier;
+            || fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier
+            || fileOrIdentifier == APEX::TuneLive::Processor::kFileOrIdentifier
+            || fileOrIdentifier == APEX::TuneLive::Processor::kTrackingIdentifier;
     }
 
     juce::String getNameOfPluginFromIdentifier (const juce::String& fileOrIdentifier) override
@@ -102,6 +122,10 @@ public:
             return APEX::Delay::Processor::kPluginName;
         if (fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier)
             return APEX::Reverie::Processor::kPluginName;
+        if (fileOrIdentifier == APEX::TuneLive::Processor::kFileOrIdentifier)
+            return APEX::TuneLive::Processor::kPluginName;
+        if (fileOrIdentifier == APEX::TuneLive::Processor::kTrackingIdentifier)
+            return APEX::TuneLive::Processor::kTrackingName;
         return {};
     }
 
@@ -129,7 +153,8 @@ public:
                 && desc.fileOrIdentifier == APEX::Delay::Processor::kFileOrIdentifier)
             || (desc.uniqueId == APEX::Reverie::Processor::kUniqueId
                 && desc.pluginFormatName.equalsIgnoreCase(kFormatName)
-                && desc.fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier);
+                && desc.fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier)
+            || isTuneLiveDescription (desc);
     }
 
     bool canScanForPlugins() const override { return false; }
@@ -190,6 +215,13 @@ protected:
                 && description.pluginFormatName.equalsIgnoreCase(kFormatName)
                 && description.fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier)
                 instance = std::make_unique<APEX::Reverie::Processor>();
+            else if (isTuneLiveDescription (description))
+            {
+                using Tune = APEX::TuneLive::Processor;
+                const auto engine = description.uniqueId == Tune::kTrackingUniqueId
+                    ? Tune::Engine::Tracking : Tune::Engine::Studio;
+                instance = std::make_unique<Tune> (engine);
+            }
             else
                 error = "Not an APEX native plugin (identifier="
                     + description.fileOrIdentifier + ").";

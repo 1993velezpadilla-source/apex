@@ -84,7 +84,7 @@ private:
 
     void testUnifiedFamilyPath()
     {
-        beginTest ("one native format discovers six visible processors");
+        beginTest ("one native format discovers nine visible processors");
         DAW::PluginScanFormatsCore formats;
         int nativeFormatCount = 0;
         for (const auto& name : formats.getRegisteredFormatNames())
@@ -99,9 +99,9 @@ private:
 
         juce::OwnedArray<juce::PluginDescription> descriptions;
         format->findAllTypesForFile (descriptions, Processor::kFileOrIdentifier);
-        expectEquals (descriptions.size(), 7,
-                      "G10/EQ/Opto/Precision C/Limiter/Delay/Reverie visible; C4 hidden");
-        if (descriptions.size() == 7)
+        expectEquals (descriptions.size(), 9,
+                      "G10/EQ/Opto/Precision C/Limiter/Delay/Reverie/Tune Live visible; C4 hidden");
+        if (descriptions.size() == 9)
         {
             expectEquals (descriptions[0]->fileOrIdentifier,
                           juce::String ("APEX::G10"));
@@ -117,6 +117,10 @@ private:
                           juce::String ("APEX::BubblegumDelay"));
             expectEquals (descriptions[6]->fileOrIdentifier,
                           juce::String ("APEX::ReverieReverb"));
+            expectEquals (descriptions[7]->fileOrIdentifier,
+                          juce::String (APEX::TuneLive::Processor::kFileOrIdentifier));
+            expectEquals (descriptions[8]->fileOrIdentifier,
+                          juce::String (APEX::TuneLive::Processor::kTrackingIdentifier));
         }
         for (const auto* desc : descriptions)
             expect (desc->fileOrIdentifier != "APEX::C4", "unfinished C4 remains hidden");
