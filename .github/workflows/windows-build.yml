@@ -88,10 +88,17 @@ jobs:
           name: Apex-EvoEye-Frames-${{ matrix.configuration }}-${{ github.sha }}
           path: My DAW/DAW_Core/evidence/boot/*.png
           if-no-files-found: error
+      - name: Exercise the real APEX GUI, project persistence and arranger navigation
+        run: .\Scripts\smoke_apex_app_launch.ps1 -Configuration ${{ matrix.configuration }}
+      - name: Publish Windows arranger preview
+        if: github.head_ref == 'feature/windows-arranger-navigation' || github.ref_name == 'feature/windows-arranger-navigation'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apex-Windows-Arranger-x64-${{ github.sha }}
+          path: My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
+          if-no-files-found: error
       - name: Run complete test suite
         run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Seed 0xA9E12026
-      - name: Smoke real APEX GUI and project automation persistence
-        run: .\Scripts\smoke_apex_app_launch.ps1 -Configuration ${{ matrix.configuration }}
       - name: Preserve test results
         if: always()
         uses: actions/upload-artifact@v4
