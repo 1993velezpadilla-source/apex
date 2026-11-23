@@ -242,6 +242,26 @@ private:
             handlePitchLoss();
             return;
         }
+        // The pitch detector observes low-pass-filtered history. During an
+        // 8-ms vowel gap that history can still return a highly confident
+        // spurious 55-Hz subharmonic even though the microphone is silent.
+        // Require the most recent 2 ms of *raw* input to carry real energy
+        // before allowing a new note to change the oscillator phase bank.
+        // This fixed 192-frame bound is inexpensive at 192 kHz and alloc-free.
+        const unsigned recentCount = std::min(filled_,
+            static_cast<unsigned>(std::clamp(static_cast<int>(rate_ * 0.002), 16, 192)));
+        double recentEnergy = 0.0;
+        for (unsigned back = 0; back < recentCount; ++back)
+        {
+            const auto& sample = history_[(position_ - 1u - back) & (kHistory - 1)];
+            const double left = sample[0], right = sample[1];
+            recentEnergy += std::max(left * left, right * right);
+        }
+        if (recentCount < 16u || recentEnergy < 1.0e-6 * recentCount)
+        {
+            handlePitchLoss();
+            return;
+        }
         const auto decision = voice_.update(pitch, policy);
         if (!decision.voiced)
         {
