@@ -1058,6 +1058,34 @@ public:
             });
         }
 
+       #if JUCE_WINDOWS
+        if (processArguments.contains("--apex-ci-timeline-navigation"))
+        {
+            const auto report = juce::SystemStats::getEnvironmentVariable("APEX_TIMELINE_NAV_REPORT", {});
+            const bool deep = processArguments.contains("--timeline-deep");
+            using Transport = TimelineNavigationReplay::Transport;
+            const auto mode = processArguments.contains("--timeline-recording") ? Transport::Recording
+                : processArguments.contains("--timeline-playing") ? Transport::Playing : Transport::Stopped;
+            const bool ruler = processArguments.contains("--timeline-ruler");
+            juce::Timer::callAfterDelay(3000, [this, report, deep, ruler, mode]
+            {
+                auto* component = mainWindow ? mainWindow->getMainComponent() : nullptr;
+                if (report.isEmpty() || component == nullptr || mainWindow->getPeer() == nullptr)
+                {
+                    setApplicationReturnValue(1);
+                    quit();
+                    return;
+                }
+                timelineNavigationReplay_ = std::make_unique<TimelineNavigationReplay>(*component,
+                    juce::File(report), deep, ruler, mode, [this](bool success)
+                    {
+                        setApplicationReturnValue(success ? 0 : 1);
+                        quit();
+                    });
+            });
+        }
+       #endif
+
         // ── Production GUI launch smoke for Windows CI ────────────────────
         // Unlike the unit-test executable, this launches the actual DAW with
         // the real MainComponent, plugin host, audio-device initialization,
@@ -1640,6 +1668,9 @@ public:
 
     void shutdown() override
     {
+       #if JUCE_WINDOWS
+        timelineNavigationReplay_.reset();
+       #endif
         stopTimer();
         if (processMode_ != DAW::ApexProcessMode::NormalApex)
             return;
@@ -2121,6 +2152,9 @@ private:
 
     // ── Timeline benchmark controller (--timeline-benchmark flag) ──────
     std::unique_ptr<TimelineBenchmarkController> benchmarkController_;
+   #if JUCE_WINDOWS
+    std::unique_ptr<TimelineNavigationReplay> timelineNavigationReplay_;
+   #endif
 
     // ── Command-line argument helpers for subprocess scanner mode ─────
     static juce::String extractQuotedArg(const juce::String& cmdLine, const juce::String& flag)

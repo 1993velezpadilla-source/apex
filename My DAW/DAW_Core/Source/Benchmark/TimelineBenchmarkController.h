@@ -1287,6 +1287,347 @@ private:
     juce::String startTrigger_;
 };
 
+#if JUCE_WINDOWS
+// Opt-in desktop replay. The actual arranger receives the same wheel events
+// and uses the same message-loop paints as an interactive Windows launch.
+class TimelineNavigationReplay final : private juce::Timer
+{
+public:
+    using Transport = MainComponent::TimelineBenchmarkTransport;
+
+    TimelineNavigationReplay(MainComponent& component, juce::File output, bool deep, bool ruler,
+                             Transport mode, std::function<void(bool)> finished)
+        : component_(&component), output_(std::move(output)), finished_(std::move(finished)),
+          deep_(deep), ruler_(ruler), mode_(mode)
+    {
+        using File = juce::File;
+        report_->setProperty("deep", deep);
+        report_->setProperty("ruler", ruler);
+        report_->setProperty("recording", recording());
+        report_->setProperty("playing", mode != Transport::Stopped);
+        fixture_ = File::getSpecialLocation(File::tempDirectory)
+            .getNonexistentChildFile("apex-timeline-replay", {});
+        if (fixture_.createDirectory().failed()
+            || !component.prepareTimelineNavigationBenchmark(fixture_, deep, mode, ruler)
+            || !component.startTimelineNavigationBenchmarkTransport(mode))
+        {
+            finish("Could not prepare the Windows arranger replay fixture");
+            return;
+        }
+        if (mode != Transport::Stopped)
+        {
+            report_->setProperty("audioDevice", "synthetic buffers through Windows callback");
+            audio_ = std::make_unique<AudioPump>(component, recording());
+        }
+        intervals_.reserve(ticksPerPhase);
+        startTimer(1600);
+    }
+
+    ~TimelineNavigationReplay() override
+    {
+        stopTimer();
+        audio_.reset();
+        if (fixture_.isDirectory())
+            fixture_.deleteRecursively();
+    }
+
+private:
+    static float testInputSample(juce::int64 frame) noexcept
+    {
+        const auto time = static_cast<double>(frame) / MainComponent::timelineBenchmarkSampleRate;
+        const auto angle = juce::MathConstants<double>::twoPi * time;
+        return static_cast<float>(0.2 * std::sin(440.0 * angle) + 0.05 * std::sin(173.0 * angle));
+    }
+
+    class AudioPump final : private juce::HighResolutionTimer
+    {
+    public:
+        AudioPump(MainComponent& component, bool withInput)
+            : component_(component), withInput_(withInput)
+        {
+            startTimer(periodMs);
+        }
+
+        ~AudioPump() override { stopTimer(); }
+        void stop() { stopTimer(); }
+        juce::int64 frames() const noexcept { return frames_; }
+        int audibleBlocks() const noexcept { return audibleBlocks_.load(std::memory_order_relaxed); }
+        int deadlineMisses() const noexcept { return deadlineMisses_.load(std::memory_order_relaxed); }
+
+    private:
+        void hiResTimerCallback() override
+        {
+            if (withInput_)
+                for (int i = 0; i < input_.getNumSamples(); ++i)
+                    input_.setSample(0, i, testInputSample(frames_ + i));
+
+            const auto start = juce::Time::getHighResolutionTicks();
+            component_.replayTimelineAudioBlock(withInput_ ? &input_ : nullptr, output_);
+            const auto elapsed = juce::Time::getHighResolutionTicks() - start;
+            if (juce::Time::highResolutionTicksToSeconds(elapsed) * 1000.0 > periodMs)
+                deadlineMisses_.fetch_add(1, std::memory_order_relaxed);
+            if (output_.getMagnitude(0, output_.getNumSamples()) > 0.0001f)
+                audibleBlocks_.fetch_add(1, std::memory_order_relaxed);
+            frames_ += output_.getNumSamples();
+        }
+
+        static constexpr int periodMs = MainComponent::timelineBenchmarkBlockSize * 1000
+            / MainComponent::timelineBenchmarkSampleRate;
+        MainComponent& component_;
+        bool withInput_;
+        juce::AudioBuffer<float> input_ { 1, MainComponent::timelineBenchmarkBlockSize };
+        juce::AudioBuffer<float> output_ { 2, MainComponent::timelineBenchmarkBlockSize };
+        juce::int64 frames_ = 0;
+        std::atomic<int> audibleBlocks_ { 0 };
+        std::atomic<int> deadlineMisses_ { 0 };
+    };
+
+    bool recording() const noexcept { return mode_ == Transport::Recording; }
+
+    struct Phase
+    {
+        const char* name;
+        float dx, dy;
+        int modifiers;
+        const char* axis;
+        int direction;
+        double rulerFirstBarIndex = 0.0;
+        int expectedRulerLabels = 0;
+    };
+
+    static constexpr int ticksPerPhase = 48;
+    static constexpr Phase phases[] {
+        { "right",        -0.060f,  0.000f, 0,                            "scrollX",     1 },
+        { "horizontal-in", 0.000f,  0.065f, juce::ModifierKeys::ctrlModifier, "pps",     1 },
+        { "horizontal-out",0.000f, -0.040f, juce::ModifierKeys::ctrlModifier, "pps",    -1 },
+        { "left",          0.060f,  0.000f, 0,                            "scrollX",    -1 },
+        { "down",          0.000f, -0.054f, 0,                            "scrollY",     1 },
+        { "vertical-in",   0.000f,  0.035f, juce::ModifierKeys::altModifier, "laneHeight", 1 },
+        { "vertical-out",  0.000f, -0.030f, juce::ModifierKeys::altModifier, "laneHeight",-1 },
+        { "up",            0.000f,  0.054f, 0,                            "scrollY",    -1 }
+    };
+
+    // Start between bars 34 and 37. Expose 38/39 and 33 at the
+    // starting scale, then repeat following horizontal and vertical zoom.
+    static constexpr int leftLabels = 1;
+    static constexpr int rightLabels = (1 << 5) | (1 << 6);
+    static constexpr Phase rulerPhases[] {
+        { "first-right",      0.f,  0.f, 0,                             "scrollX",     1, 35.0, rightLabels },
+        { "first-left",       0.f,  0.f, 0,                             "scrollX",    -1, 31.5, leftLabels },
+        { "horizontal-in",   0.f,  0.025f, juce::ModifierKeys::ctrlModifier, "pps",     1 },
+        { "horizontal-out",  0.f, -0.010f, juce::ModifierKeys::ctrlModifier, "pps",    -1 },
+        { "right-after-zoom", 0.f,  0.f, 0,                             "scrollX",     1, 36.0, rightLabels },
+        { "vertical-in",     0.f,  0.035f, juce::ModifierKeys::altModifier, "laneHeight", 1 },
+        { "vertical-out",    0.f, -0.030f, juce::ModifierKeys::altModifier, "laneHeight",-1 },
+        { "left-after-zoom",  0.f,  0.f, 0,                             "scrollX",    -1, 31.5, leftLabels }
+    };
+
+    void timerCallback() override
+    {
+        if (!component_)
+        {
+            finish("Windows arranger window closed during navigation");
+            return;
+        }
+        if (waitingForTake_)
+        {
+            checkRecordedTake();
+            return;
+        }
+        const auto& phase = ruler_ ? rulerPhases[phaseIndex_] : phases[phaseIndex_];
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (ticks_ == 0)
+        {
+            startTimer(16);
+            before_ = component_->timelineNavigationBenchmarkState(false);
+            intervals_.clear();
+        }
+        else
+            intervals_.push_back(now - lastTick_);
+        lastTick_ = now;
+
+        if (ticks_++ < ticksPerPhase)
+        {
+            float dx = phase.dx;
+            if (phase.rulerFirstBarIndex > 0.0)
+            {
+                const double target = phase.rulerFirstBarIndex * 2.0 * double(before_["pps"]);
+                dx = static_cast<float>((double(before_["scrollX"]) - target) / (120.0 * ticksPerPhase));
+            }
+            component_->replayTimelineWheel(dx, phase.dy, juce::ModifierKeys(phase.modifiers));
+            return;
+        }
+
+        const auto after = component_->timelineNavigationBenchmarkState(true);
+        auto* entry = new juce::DynamicObject();
+        entry->setProperty("phase", phase.name);
+        entry->setProperty("before", before_);
+        entry->setProperty("after", after);
+        const int audibleBlocks = audio_ ? audio_->audibleBlocks() : 0;
+        entry->setProperty("callbackDeadlineMisses", audio_ ? audio_->deadlineMisses() : 0);
+        entry->setProperty("audibleBlocks", audibleBlocks);
+        std::sort(intervals_.begin(), intervals_.end());
+        entry->setProperty("replayIntervalP95Ms", intervals_[intervals_.size() * 95 / 100]);
+        results_.add(juce::var(entry));
+
+        const auto shift = double(after[phase.axis]) - double(before_[phase.axis]);
+        const bool painted = int(after["arrangerPaintMs"]["count"]) > 0;
+        const bool wave = ruler_ || phaseIndex_ >= 3 || double(after["waveformPaints"]) > double(before_["waveformPaints"]);
+        const bool maximum = !deep_ || ((phaseIndex_ != 1 || double(after["pps"]) == 16'000.0)
+                                    && (phaseIndex_ != 5 || int(after["laneHeight"]) == 360));
+        const bool playbackAdvanced = !audio_ || (static_cast<bool>(after["playing"])
+            && static_cast<juce::int64>(after["playheadFrames"])
+                > static_cast<juce::int64>(before_["playheadFrames"]));
+        if (audio_ && audibleBlocks == 0)
+        {
+            finish("The Windows playback engine did not render the benchmark clip");
+            return;
+        }
+        const bool rulerReady = !ruler_ || (int(after["rulerAtlasBuilds"]) == int(before_["rulerAtlasBuilds"])
+            && int(after["rulerAtlasLabelDraws"]) > int(before_["rulerAtlasLabelDraws"])
+            && (int(after["rulerObservedLabels"]) & phase.expectedRulerLabels) == phase.expectedRulerLabels);
+        if (!rulerReady)
+        {
+            finish(juce::String("Ruler numeral reuse or viewport label coverage failed in ") + phase.name);
+            return;
+        }
+
+        const bool takeAdvanced = !recording() || (static_cast<bool>(after["recording"])
+            && static_cast<bool>(after["recordingInputAvailable"])
+            && static_cast<juce::int64>(after["recordedFrames"])
+                > static_cast<juce::int64>(before_["recordedFrames"]));
+        if (!takeAdvanced)
+        {
+            finish(juce::String("The live take stopped advancing in ") + phase.name);
+            return;
+        }
+
+        if (shift * phase.direction <= 0 || !painted || !wave || !maximum || !playbackAdvanced
+            || after["trackHeaderHeight"] != after["laneHeight"]
+            || after["rebuilds"] != before_["rebuilds"])
+        {
+            finish(juce::String(playbackAdvanced ? "Navigation, waveform or layout check failed in "
+                                                 : "Playback did not advance during ") + phase.name);
+            return;
+        }
+
+        ticks_ = 0;
+        if (++phaseIndex_ != std::size(phases))
+            return;
+        if (!recording())
+        {
+            finish({});
+            return;
+        }
+
+        audio_->stop();
+        expectedFrames_ = audio_->frames();
+        report_->setProperty("expectedRecordedFrames", expectedFrames_);
+        report_->setProperty("restoredTracks", component_->getAppCore().getTrackManager().getNumTracks());
+        if (static_cast<juce::int64>(after["liveWaveformPaints"]) <= 0)
+        {
+            finish("The live take advanced without painting a waveform");
+            return;
+        }
+        component_->getAppCore().getTransport().stop();
+        waitingForTake_ = true;
+        finalizeStartedMs_ = juce::Time::getMillisecondCounterHiRes();
+        startTimer(40);
+    }
+
+    void checkRecordedTake()
+    {
+        auto& recorder = component_->getAppCore().getRecordingEngine();
+        if (recorder.isRecording())
+        {
+            if (juce::Time::getMillisecondCounterHiRes() - finalizeStartedMs_ > 8000.0)
+                finish("The Windows replay take did not finish saving");
+            return;
+        }
+
+        const auto diag = recorder.getDiagnosticsSnapshot();
+        if (diag.tracks.size() != 1)
+        {
+            finish("Expected one armed track in the reopened fixture");
+            return;
+        }
+        const auto& writer = diag.tracks.getReference(0).writer;
+        report_->setProperty("writerRejectedBlocks", static_cast<juce::int64>(writer.pushRejected));
+        if (writer.pushRejected != 0 || writer.pushSamplesAccepted != expectedFrames_)
+        {
+            finish("The writer did not accept every callback sample");
+            return;
+        }
+
+        const auto takes = fixture_.getChildFile("Recordings").findChildFiles(juce::File::findFiles, false, "*.wav");
+        juce::WavAudioFormat wav;
+        auto stream = takes.size() == 1 ? takes[0].createInputStream() : nullptr;
+        std::unique_ptr<juce::AudioFormatReader> reader(stream == nullptr ? nullptr
+            : wav.createReaderFor(stream.release(), true));
+        if (reader == nullptr || reader->lengthInSamples != expectedFrames_ || reader->numChannels != 2
+            || reader->sampleRate != MainComponent::timelineBenchmarkSampleRate)
+        {
+            finish("Could not reopen a complete take WAV");
+            return;
+        }
+
+        juce::AudioBuffer<float> samples(2, 4096);
+        float peakError = 0.0f;
+        for (juce::int64 start = 0; start < expectedFrames_; start += samples.getNumSamples())
+        {
+            const int count = static_cast<int>(std::min<juce::int64>(samples.getNumSamples(), expectedFrames_ - start));
+            if (!reader->read(&samples, 0, count, start, true, true))
+            {
+                finish("Could not read the take WAV");
+                return;
+            }
+            for (int i = 0; i < count; ++i)
+            {
+                const auto expected = testInputSample(start + i);
+                for (int channel = 0; channel < samples.getNumChannels(); ++channel)
+                    peakError = std::max(peakError, std::abs(samples.getSample(channel, i) - expected));
+            }
+        }
+        report_->setProperty("verifiedRecordedFrames", reader->lengthInSamples);
+        report_->setProperty("peakRecordedSampleError", static_cast<double>(peakError));
+        // The recording may use 16-bit PCM according to the saved preferences.
+        finish(peakError <= 1.0e-4f ? juce::String() : "The recorded samples differ from the callback input");
+    }
+
+    void finish(const juce::String& error)
+    {
+        stopTimer();
+        if (audio_)
+            report_->setProperty("callbackDeadlineMisses", audio_->deadlineMisses());
+        audio_.reset();
+        TimelinePaintMetrics::active.store(false, std::memory_order_relaxed);
+        report_->setProperty("error", error);
+        report_->setProperty("phases", results_);
+        const bool written = output_.replaceWithText(juce::JSON::toString(juce::var(report_.get())));
+        finished_(written && error.isEmpty());
+    }
+
+    juce::Component::SafePointer<MainComponent> component_;
+    juce::File output_;
+    std::function<void(bool)> finished_;
+    juce::DynamicObject::Ptr report_ = new juce::DynamicObject();
+    juce::Array<juce::var> results_;
+    std::vector<double> intervals_;
+    juce::var before_;
+    double lastTick_ = 0.0;
+    std::size_t phaseIndex_ = 0;
+    int ticks_ = 0;
+    bool deep_;
+    bool ruler_;
+    Transport mode_;
+    bool waitingForTake_ = false;
+    juce::int64 expectedFrames_ = 0;
+    double finalizeStartedMs_ = 0.0;
+    juce::File fixture_;
+    std::unique_ptr<AudioPump> audio_;
+};
+#endif
+
 //==============================================================================
 // Inline helper to extract benchmark-label and benchmark-project arguments.
 // Handles both:

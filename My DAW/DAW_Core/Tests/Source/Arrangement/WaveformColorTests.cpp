@@ -50,7 +50,7 @@ const juce::Colour kEngineClipDefaultViolet(0xFFB661F4);
 
 struct WaveformRenderFixture
 {
-    ArrangementZoomCore zoom;
+    TimelineZoomController zoom;
     ArrangementClipModel model;
     std::unique_ptr<ClipRenderCore> renderer;
 

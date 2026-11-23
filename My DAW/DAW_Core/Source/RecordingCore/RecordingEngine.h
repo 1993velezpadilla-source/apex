@@ -315,7 +315,7 @@ public:
                 + "_" + juce::String(fileIndex++) + ".wav");
 
             auto& liveWaveform = track->getLiveRecordWaveform();
-            liveWaveform.reset(blockSize_);
+            liveWaveform.reset(blockSize_, rec->startPosition, recordLoopStart_, recordLoopEnd_);
             // C11: bind the take to the resolved track objects now (message
             // thread) instead of resolving per block on the audio thread.
             rec->resolvedTrack = track;
@@ -477,16 +477,15 @@ public:
             }
             diagDry_.fetch_add(1, std::memory_order_relaxed);                        // [APEX-DIAG-RECPATH]
 
-            if (writeAccepted && inputAvailable && liveWaveform != nullptr)
+            if (writeAccepted && liveWaveform != nullptr)
             {
                 float mn = 0.f, mx = 0.f;
                 bool hasPeak = false;
-                for (int ch = 0; ch < 2; ++ch)
-                    for (int s = 0; s < writableSamples; ++s)
-                    {
-                        accumulateLivePeakSample(chans[ch][s], mn, mx, hasPeak);
-                    }
-                liveWaveform->pushPeak(mn, mx);
+                if (inputAvailable)
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int s = 0; s < writableSamples; ++s)
+                            accumulateLivePeakSample(chans[ch][s], mn, mx, hasPeak);
+                liveWaveform->pushPeak(mn, mx, writableSamples);
             }
         }
     }
@@ -550,7 +549,7 @@ public:
                 for (int ch = 0; ch < 2; ++ch)
                     for (int sample = 0; sample < numSamples; ++sample)
                         accumulateLivePeakSample(channels[ch][sample], mn, mx, hasPeak);
-                liveWaveform->pushPeak(mn, mx);
+                liveWaveform->pushPeak(mn, mx, numSamples);
             }
         }
     }
@@ -1144,6 +1143,8 @@ private:
 
                 if (!writeAccepted)
                     break;
+                if (rec->liveWaveform != nullptr)
+                    rec->liveWaveform->pushPeak(0.0f, 0.0f, chunk);
                 remaining -= chunk;
             }
             diagWetMissSilence_.fetch_add(1, std::memory_order_relaxed);

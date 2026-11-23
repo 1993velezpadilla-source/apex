@@ -18,7 +18,6 @@
 #include "../AutomationCore/AutomationManagerCore.h"
 #include "../PluginHostCore/PluginChainCore.h"
 #include "../RoutingCore/RoutingGraph.h"
-#include "../RecordingCore/RecordingOverlayStateCore.h"
 #include "TrackPlaylistPanel.h"
 #include "TrackPlaylistInlineLayoutCore.h"
 #include "../../Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h"
@@ -171,22 +170,23 @@ public:
                 onOpenSelectedMidiClip();
         };
 
-        // Wire zoom changes → header sync so TrackList row heights stay
-        // in sync with ArrangementViewCore track height at all times.
-        core_->getZoom().onZoomChanged = [this]()
+        core_->onZoomLayout = [this](bool vertical)
         {
-            defaultLaneHeight_ = (int)core_->getZoom().getTrackHeightPx();
-            if (core_ != nullptr)
-                core_->resized();
-            // Dynamic take rows must be re-laid out on vertical zoom too.
-            if (inlinePlaylistPanel_ != nullptr)
-                refreshInlinePlaylistLayout();
-            else
+            if (vertical)
             {
-                updateInlinePlaylistBounds();
-                if (onLaneLayoutChanged) onLaneLayoutChanged();
+                defaultLaneHeight_ = core_->getZoom().getTrackHeightPx();
+                if (inlinePlaylistPanel_ != nullptr)
+                    refreshInlinePlaylistLayout();
+                else if (onLaneLayoutChanged)
+                    onLaneLayoutChanged();
             }
-            repaint();
+            if (onZoomLayout)
+                onZoomLayout(vertical);
+        };
+        core_->onZoomPresented = [this]
+        {
+            if (onZoomPresented)
+                onZoomPresented();
         };
 
         addAndMakeVisible(*core_);
@@ -209,8 +209,6 @@ trackManager_.addListener(this);
         transport_.addListener(this);
         mirrorAllEngineClipsIntoArrangement();
         syncAutomationLanesFromTracks();
-        // Timer is for playhead repaint only — clip mirroring is event-driven
-        // via clipAdded/clipRemoved to avoid the repaint storm.
         startTimerHz(60);
     }
 
@@ -301,13 +299,16 @@ trackManager_.addListener(this);
 
     void setEngineSampleRate(double sampleRate)
     {
-        sampleRate = juce::jmax(1.0, sampleRate);
+        if (!std::isfinite(sampleRate) || sampleRate < 1.0)
+            return;
         currentEngineSampleRate_ = sampleRate;
 
         if (core_ != nullptr)
             core_->setEngineSampleRate(sampleRate);
         mirrorAllEngineClipsIntoArrangement();
     }
+
+    double getEngineSampleRate() const noexcept { return currentEngineSampleRate_; }
 
     // Transport controller listener - update UI tempo when transport tempo changes
     void tempoChanged(double newTempo) override
@@ -369,7 +370,7 @@ trackManager_.addListener(this);
         // One native main band + N alternate take bands in this SAME track.
         const int takeHeight = TrackPlaylistInlineLayoutCore::takeHeightForTrackHeight(
             (int)core_->getZoom().getTrackHeightPx());
-        const int extras = juce::jmin(128, juce::jmax(0,
+        const int extras = juce::jmin(TrackPlaylistInlineLayoutCore::maxTakeRows, juce::jmax(0,
             (int)track->getPlaylists().size() - 1)) * takeHeight;
         inlinePlaylistPanel_->setInlineTakeHeight(takeHeight);
         core_->setInlinePlaylistExpansion(inlinePlaylistTrackId_, extras);
@@ -414,13 +415,33 @@ trackManager_.addListener(this);
         return core_ != nullptr ? core_->getZoom().getPixelsPerSecond() : 100.0;
     }
 
-    void setPixelsPerSecond(double pixelsPerSecond)
+    void zoomStep(bool vertical, bool in)
     {
-        if (core_ != nullptr)
-            core_->getZoom().setPixelsPerSecond(pixelsPerSecond);
-        resized();
-        repaint();
+        if (core_)
+            core_->zoomStep(vertical, in);
     }
+
+    bool zoomWheel(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+    {
+        return core_ && core_->zoomWheel(event, wheel);
+    }
+
+    void zoomScrollbar(bool vertical, bool startEdge, double ratio,
+                       ArrangementEditor::TimelineZoomController::Scale reference,
+                       ArrangementEditor::TimelineZoomController::Point origin)
+    {
+        if (core_)
+            core_->zoomScrollbar(vertical, startEdge, ratio, reference, origin);
+    }
+
+    bool isApplyingZoom() const noexcept { return core_ != nullptr && core_->isApplyingZoom(); }
+    std::function<void(bool heightChanged)> onZoomLayout;
+    std::function<void()> onZoomPresented;
+    // Mobile message-thread transport sample: the audio callback advances
+    // position with setPositionFromAudioThread(), which deliberately sends
+    // NO positionChanged notification. Use this lightweight callback to
+    // extend the virtual viewport ahead of a long in-progress recording.
+    std::function<void()> onTransportTick;
 
     void setViewportScrollOffsets(int scrollX, int scrollY)
     {
@@ -544,13 +565,12 @@ trackManager_.addListener(this);
 
     void setLaneHeight(int /*index*/, int newHeight)
     {
-        newHeight = juce::jlimit(24, 180, newHeight);
-        defaultLaneHeight_ = newHeight;
-        if (core_ != nullptr)
-            core_->getZoom().setTrackHeightPx((double)newHeight);
-        // onLaneLayoutChanged fired by zoom callback wired in constructor
-        resized();
-        repaint();
+        defaultLaneHeight_ = ArrangementEditor::TimelineZoomController::displayHeight(newHeight);
+        if (!core_)
+            return;
+        auto scale = core_->getZoom().scale();
+        scale.laneHeight = defaultLaneHeight_;
+        core_->zoomTo(scale, {});
     }
 
     void setMultiSelectedClips(const std::vector<juce::String>& ids)
@@ -729,81 +749,7 @@ trackManager_.addListener(this);
     {
         if (core_ != nullptr)
         {
-            // The first lane can have virtual take rows; its expanded
-            // height is NOT the height of a physical recording track.
-            const int trackH = getPhysicalTrackHeight();
-            const double sr = juce::jmax(1.0, core_->m_engineSampleRate);
-            const double pxPerSecond = core_->getZoom().getPixelsPerSecond();
-            const auto currentSamples = transport_.getPosition();
-
-            for (int i = 0; i < trackManager_.getNumTracks(); ++i)
-            {
-                auto* track = trackManager_.getTrack(i);
-                if (track == nullptr)
-                    continue;
-
-                auto& liveWaveform = track->getLiveRecordWaveform();
-                if (!RecordingOverlayStateCore::shouldShowOverlay(
-                        liveWaveform.isTakeActive(), track->isArmed()))
-                    continue;
-
-                auto it = liveRecordingStartSamples_.find(track->getID());
-                if (it == liveRecordingStartSamples_.end())
-                    continue;
-
-                const auto startSamples = it->second;
-                const auto recordedSamples = juce::jmax<SamplePosition>(0, currentSamples - startSamples);
-
-                // Use the core's timeToScreenX() which accounts for the
-                // horizontal scroll offset applied by ArrangementViewCore.
-                // The old manual calculation (startSamples / sr * pxPerSecond)
-                // ignored the scroll offset, causing the recording overlay
-                // (and its live waveform) to draw at the wrong X position
-                // whenever the viewport was scrolled — Bug #3.
-                const float x = (float)core_->timeToScreenX((double)startSamples / sr);
-                const float endX = (float)core_->timeToScreenX((double)(startSamples + recordedSamples) / sr);
-                const float w = juce::jmax(2.0f, endX - x);
-                // Use the same authoritative Y projection as native clip
-                // renderers. An expanded playlist above this track inserts
-                // virtual lanes, so multiplying physical index by trackH
-                // paints live recording waves on the WRONG track.
-                const auto physicalBand = core_->getTrackLaneBounds(track->getID());
-                if (physicalBand.isEmpty())
-                    continue; // collapsed folder descendants stay hidden
-                const float y = (float)physicalBand.getY();
-                juce::Rectangle<float> clipBounds(x, y, w, (float)trackH - 2.0f);
-
-                g.setColour(track->getColor().darker(0.45f).withAlpha(0.92f));
-                g.fillRoundedRectangle(clipBounds, 4.0f);
-
-                const auto header = juce::Rectangle<float>(clipBounds.getX(), clipBounds.getY(), clipBounds.getWidth(), 18.0f);
-                g.setColour(track->getColor());
-                g.fillRoundedRectangle(header, 4.0f);
-                g.fillRect(header.withTrimmedTop(4.0f));
-
-                const auto waveformArea = clipBounds.withTrimmedTop(18.0f).reduced(2.0f, 2.0f);
-                const bool inputAvailable = liveWaveform.isInputAvailable();
-                if (inputAvailable)
-                    liveWaveform.draw(g,
-                                      waveformArea,
-                                      juce::Colours::white.withAlpha(0.72f),
-                                      (float)(pxPerSecond / sr),
-                                      (double)recordedSamples);
-
-                g.setColour(juce::Colours::white.withAlpha(0.85f));
-                g.setFont(juce::Font(11.0f, juce::Font::bold));
-                const auto recordingLabel = inputAvailable
-                    ? juce::String("Recording...")
-                    : juce::String("No input — recording silence");
-                g.drawText(recordingLabel, header.reduced(6.0f, 0.0f).toNearestInt(),
-                           juce::Justification::centredLeft, true);
-
-                g.setColour(juce::Colour(0xFFFF4D4D).withAlpha(0.95f));
-                g.fillEllipse(header.getRight() - 14.0f, header.getCentreY() - 4.0f, 8.0f, 8.0f);
-
-                g.setColour(juce::Colour(0xFF111111));
-                g.drawRoundedRectangle(clipBounds.reduced(0.5f), 4.0f, 1.0f);
-            }
+            drawLiveRecordingOverlays(g);
 
             if (pluginDropHoverTrackId_.isNotEmpty())
             {
@@ -1398,40 +1344,20 @@ void trackPropertyChanged(Track* track) override
             }
         }
 
-        bool hasActiveTakes = false;
-        const auto startSample = transport_.getPosition();
-        for (int i = 0; i < trackManager_.getNumTracks(); ++i)
+        updateTimelinePresentation();
+
+        if (automationSyncDirty_)
         {
-            if (auto* track = trackManager_.getTrack(i))
-            {
-                if (RecordingOverlayStateCore::shouldShowOverlay(
-                        track->getLiveRecordWaveform().isTakeActive(), track->isArmed()))
-                {
-                    hasActiveTakes = true;
-                    if (liveRecordingStartSamples_.find(track->getID()) == liveRecordingStartSamples_.end())
-                        liveRecordingStartSamples_[track->getID()] = startSample;
-                }
-                else
-                {
-                    liveRecordingStartSamples_.erase(track->getID());
-                }
-            }
+            syncAutomationLanesFromTracks();
+            automationSyncDirty_ = false;
         }
+    }
 
-        if (!hasActiveTakes && wasRecording_)
-        {
-            liveRecordingStartSamples_.clear();
-            mirrorAllEngineClipsIntoArrangement();
-        }
-
-        if (hasActiveTakes != wasRecording_)
-            repaint();
-        wasRecording_ = hasActiveTakes;
-
-        // Record message-thread frame interval for benchmark metrics.
-        // This is the arrangement's 60 Hz timer callback — the closest
-        // message-thread presentation signal. Label: message-thread tick
-        // interval, NOT OS-presented FPS or VSync timing.
+    void updateTimelinePresentation()
+    {
+        if (onTransportTick && (transport_.isPlaying() || transport_.isRecording()))
+            onTransportTick();
+        updateLiveRecordingOverlays();
         TimelinePaintMetrics::frameSampler.tick();
 
         if (core_ != nullptr)
@@ -1441,23 +1367,167 @@ void trackPropertyChanged(Track* track) override
             const double playheadSeconds = (double)transport_.getPosition() / sr;
             core_->setPlayheadPosition(playheadSeconds);
             // Stereo peaks are published atomically by the real master audio
-            // thread. Sample on the UI timer only: never allocate/lock or
+            // thread. Sample on the UI thread only: never allocate/lock or
             // render waveform objects inside the audio callback.
             if (auto* master = trackManager_.getMasterTrack())
                 core_->recordMasterOutputPreview(playheadSeconds,
                     master->getPeakLevelLeft(), master->getPeakLevelRight(),
                     transport_.isPlaying());
         }
+    }
 
-        if (automationSyncDirty_)
+    struct LiveRecordingVisual
+    {
+        LiveRecordWaveformCore::RecordedSpan span {};
+        juce::Rectangle<int> bounds;
+        bool inputAvailable = false;
+        double pixelsPerSample = 0.0;
+    };
+
+    static int liveRecordingHeaderHeight(int laneHeight) noexcept
+    {
+        return juce::jlimit(0, 18, laneHeight - 8);
+    }
+
+    juce::Rectangle<int> visibleRecordingBody() const
+    {
+        if (const auto* viewport = findParentComponentOfClass<juce::Viewport>())
+            return viewport->getViewArea().withTrimmedTop(core_->arrangementContentTop());
+        return getLocalBounds().withTrimmedTop(core_->arrangementContentTop());
+    }
+
+    LiveRecordingVisual liveRecordingVisual(Track& track) const
+    {
+        const auto& waveform = track.getLiveRecordWaveform();
+        const auto span = waveform.getRecordedSpan();
+        const auto band = core_->getTrackLaneBounds(track.getID());
+        if (band.isEmpty())
+            return { span, {}, waveform.isInputAvailable() };
+        const auto rate = juce::jmax(1.0, core_->m_engineSampleRate);
+        const auto begin = core_->timeToScreenX(static_cast<double>(span.timelineStart) / rate);
+        const auto end = core_->timeToScreenX((static_cast<double>(span.timelineStart) + span.length) / rate);
+        return { span, { begin, band.getY(), juce::jmax(6, end - begin),
+                         juce::jmax(0, getPhysicalTrackHeight() - 2) }, waveform.isInputAvailable(),
+                 core_->getZoom().getPixelsPerSecond() / rate };
+    }
+
+    void updateLiveRecordingOverlays()
+    {
+        if (!core_ || (!transport_.isRecording() && liveRecordingVisuals_.empty()))
+            return;
+
+        constexpr bool framePaced = false;
+        const bool hadTakes = !liveRecordingVisuals_.empty();
+        const auto visible = visibleRecordingBody();
+        const auto invalidate = [this, visible](juce::Rectangle<int> bounds)
         {
-            syncAutomationLanesFromTracks();
-            automationSyncDirty_ = false;
+            if (!bounds.isEmpty())
+                repaint(bounds.expanded(1).getIntersection(visible));
+        };
+        for (auto it = liveRecordingVisuals_.begin(); it != liveRecordingVisuals_.end();)
+        {
+            auto* track = trackManager_.getTrack(it->first);
+            if (track != nullptr && track->getLiveRecordWaveform().isTakeActive())
+            {
+                ++it;
+                continue;
+            }
+            invalidate(it->second.bounds);
+            it = liveRecordingVisuals_.erase(it);
         }
 
-        // NOTE: playhead repaint is handled inside
-        // ArrangementViewCore::setPlayheadPosition() using bounded dirty
-        // rectangles (F1). No duplicate full repaint needed here.
+        for (int i = 0; i < trackManager_.getNumTracks(); ++i)
+        {
+            auto* track = trackManager_.getTrack(i);
+            if (!track || !track->getLiveRecordWaveform().isTakeActive())
+                continue;
+
+            auto& previous = liveRecordingVisuals_[track->getID()];
+            const auto next = liveRecordingVisual(*track);
+            const bool samePass = previous.span.timelineStart == next.span.timelineStart
+                && previous.span.sourceOffset == next.span.sourceOffset
+                && previous.inputAvailable == next.inputAvailable;
+            if (samePass && previous.bounds == next.bounds && previous.span.length == next.span.length)
+                continue;
+
+            const bool growing = samePass && !previous.bounds.isEmpty()
+                && previous.bounds.getPosition() == next.bounds.getPosition()
+                && previous.bounds.getHeight() == next.bounds.getHeight()
+                && previous.bounds.getRight() <= next.bounds.getRight();
+            const bool labelFits = previous.bounds.getWidth() >= 200;
+            const bool sameProjection = previous.pixelsPerSample == next.pixelsPerSample
+                && previous.span.length <= next.span.length;
+            if (growing && (framePaced ? sameProjection : labelFits))
+            {
+                // The samples in old columns are unchanged. Repaint the new
+                // columns, the old rounded edge and the moving record dot.
+                const int edge = juce::jmax(next.bounds.getX(), previous.bounds.getRight() - 20);
+                invalidate(next.bounds.withLeft(edge));
+                if (!labelFits)
+                    invalidate(next.bounds.withHeight(liveRecordingHeaderHeight(next.bounds.getHeight())));
+            }
+            else
+            {
+                invalidate(previous.bounds);
+                invalidate(next.bounds);
+            }
+            previous = next;
+        }
+
+        if (hadTakes && liveRecordingVisuals_.empty())
+            mirrorAllEngineClipsIntoArrangement();
+    }
+
+    void drawLiveRecordingOverlays(juce::Graphics& g)
+    {
+        if (liveRecordingVisuals_.empty())
+            return;
+
+        juce::Graphics::ScopedSaveState clipToBody(g);
+        if (!g.reduceClipRegion(visibleRecordingBody()))
+            return;
+        const auto dirty = g.getClipBounds();
+        const auto pixelsPerSample = core_->getZoom().getPixelsPerSecond()
+            / juce::jmax(1.0, core_->m_engineSampleRate);
+
+        for (const auto& entry : liveRecordingVisuals_)
+        {
+            auto* track = trackManager_.getTrack(entry.first);
+            if (track == nullptr || !track->getLiveRecordWaveform().isTakeActive())
+                continue;
+            const auto visual = liveRecordingVisual(*track);
+            if (!dirty.intersects(visual.bounds))
+                continue;
+            const auto bounds = visual.bounds.toFloat();
+            // Reserve waveform space even at the minimum 24 px lane height.
+            const auto headerHeight = static_cast<float>(liveRecordingHeaderHeight(visual.bounds.getHeight()));
+            const auto header = bounds.withHeight(headerHeight);
+            g.setColour(track->getColor().darker(0.45f).withAlpha(0.92f));
+            g.fillRoundedRectangle(bounds, 4.0f);
+            if (visual.inputAvailable && track->getLiveRecordWaveform().draw(g,
+                    bounds.withTrimmedTop(headerHeight).reduced(2.0f), juce::Colours::white.withAlpha(0.72f),
+                    pixelsPerSample, static_cast<double>(visual.span.length), visual.span.sourceOffset))
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::liveRecordingWaveformPaints);
+
+            if (dirty.intersects(header.getSmallestIntegerContainer()))
+            {
+                g.setColour(track->getColor());
+                g.fillRoundedRectangle(header, 4.0f);
+                g.fillRect(header.withTrimmedTop(4.0f));
+                if (header.getWidth() >= 16.0f)
+                {
+                    static const juce::Font font(11.0f, juce::Font::bold);
+                    g.setFont(font);
+                    g.setColour(juce::Colours::white.withAlpha(0.85f));
+                    g.drawText(visual.inputAvailable ? "Recording..." : "No input - recording silence",
+                               header.reduced(6.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, true);
+                    g.setColour(juce::Colour(0xFFFF4D4D).withAlpha(0.95f));
+                    g.fillEllipse(header.getRight() - 14.0f, header.getCentreY() - 4.0f, 8.0f, 8.0f);
+                }
+            }
+            g.setColour(juce::Colour(0xFF111111));
+            g.drawRoundedRectangle(bounds.reduced(0.5f), 4.0f, 1.0f);
+        }
     }
 
     int getTrackIndexForClip(const Clip& clip) const
@@ -1712,7 +1782,7 @@ void trackPropertyChanged(Track* track) override
 std::unordered_map<juce::String, juce::Uuid> engineClipIdsToArrangementIds_;
     std::unordered_set<juce::String> multiSelectedClipIDs_;
     std::unordered_set<TrackID> collapsedFolders_;
-    std::unordered_map<TrackID, SamplePosition> liveRecordingStartSamples_;
+    std::unordered_map<TrackID, LiveRecordingVisual> liveRecordingVisuals_;
     std::unordered_map<TrackID, juce::String> visibleAutomationTargets_;
     TrackID pluginDropHoverTrackId_;
     // Last track colour propagated to clips (per track). Guards against
@@ -1738,7 +1808,6 @@ std::unordered_map<juce::String, juce::Uuid> engineClipIdsToArrangementIds_;
     bool keepWaveformsVisibleWhileScrolling_ = false;
     bool isImportingDroppedFiles_ = false;
     bool importDecodeInFlight_ = false;
-    bool wasRecording_ = false;
     bool isMirroringToArrangement_ = false;
     double currentEngineSampleRate_ = 44100.0;
     // REMOVED in F1: lastTimerPlayheadPos_ — playhead repaint is now handled

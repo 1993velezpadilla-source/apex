@@ -3,6 +3,8 @@
 // ===========================================================================
 #include "ArrangementRulerCore.h"
 #include "../../../Source/DiagnosticsCore/TimelinePaintMetrics.h"
+#include <algorithm>
+#include <charconv>
 
 namespace ArrangementEditor
 {
@@ -19,7 +21,7 @@ namespace ArrangementEditor
         constexpr uint32_t loopRegion = 0x33813CFF;  // violet wash
     }
 
-    ArrangementRulerCore::ArrangementRulerCore(ArrangementZoomCore& zoom)
+    ArrangementRulerCore::ArrangementRulerCore(const TimelineZoomController& zoom)
         : m_zoom(zoom)
     {
         setSize(800, 32);
@@ -27,6 +29,8 @@ namespace ArrangementEditor
 
     void ArrangementRulerCore::setTempo(double bpm)
     {
+        if (m_bpm == bpm)
+            return;
         m_bpm = bpm;
         repaint();
     }
@@ -38,11 +42,10 @@ namespace ArrangementEditor
          *  Clamped to ruler local bounds. */
         constexpr int kRulerPlayheadHalfWidth = 6;
 
-        /** Song-time label "m:ss" for a given time in seconds. */
-        juce::String formatTimeSeconds(double seconds)
+        /** The ruler rounds to the nearest second for its m:ss label. */
+        int labelSeconds(double seconds)
         {
-            const int totalSecs = juce::jmax(0, (int) std::llround(seconds));
-            return juce::String::formatted("%d:%02d", totalSecs / 60, totalSecs % 60);
+            return juce::jmax(0, (int) std::llround(seconds));
         }
 
         juce::Rectangle<int> rulerPlayheadDirtyRect(
@@ -63,49 +66,38 @@ namespace ArrangementEditor
         m_playheadTime = timeSeconds;
         const int newX = timeToX(timeSeconds);
 
-        const int rulerW = getWidth();
-        const int rulerH = getHeight();
+        if (oldX == newX)
+            return;
 
-        if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+        const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+        for (const int x : { oldX, newX })
         {
-            auto recordOne = [&](int x) {
-                auto r = rulerPlayheadDirtyRect(x, rulerW, rulerH);
-                if (r.isEmpty()) return;
+            const auto dirty = rulerPlayheadDirtyRect(x, getWidth(), getHeight());
+            if (dirty.isEmpty())
+                continue;
+            repaint(dirty);
+            if (metricsActive)
+            {
+                const auto area = static_cast<uint64_t>(dirty.getWidth()) * dirty.getHeight();
                 TimelinePaintMetrics::requestedPartialRepaints.fetch_add(1);
-                auto area = static_cast<uint64_t>(r.getWidth())
-                          * static_cast<uint64_t>(r.getHeight());
-                TimelinePaintMetrics::requestedDirtyAreaPixels.fetch_add(
-                    static_cast<int64_t>(area));
+                TimelinePaintMetrics::requestedDirtyAreaPixels.fetch_add(static_cast<int64_t>(area));
                 TimelinePaintMetrics::requestedDirtyAreaPixelsRing.push(area);
-            };
-            if (oldX == newX) {
-                recordOne(newX);
-            } else {
-                recordOne(oldX);
-                recordOne(newX);
             }
-        }
-
-        // Issue partial repaints for old and new playhead positions
-        if (oldX == newX) {
-            auto r = rulerPlayheadDirtyRect(newX, rulerW, rulerH);
-            if (!r.isEmpty()) repaint(r);
-        } else {
-            auto oldR = rulerPlayheadDirtyRect(oldX, rulerW, rulerH);
-            if (!oldR.isEmpty()) repaint(oldR);
-            auto newR = rulerPlayheadDirtyRect(newX, rulerW, rulerH);
-            if (!newR.isEmpty()) repaint(newR);
         }
     }
 
-    void ArrangementRulerCore::setScrollOffsetX(int scrollOffsetX)
+    void ArrangementRulerCore::setScrollOffsetX(int scrollOffsetX, bool boundsMovePending)
     {
         scrollOffsetX = juce::jmax(0, scrollOffsetX);
         if (m_scrollOffsetX == scrollOffsetX)
             return;
 
         m_scrollOffsetX = scrollOffsetX;
-        repaint();
+        // The horizontal viewport pan immediately moves these pinned bounds.
+        // JUCE dirties the old/new areas there; a second full ruler repaint
+        // before setBounds() is redundant. Zoom-only changes still repaint.
+        if (!boundsMovePending)
+            repaint();
     }
 
     void ArrangementRulerCore::setLoopRegion(double startTime, double endTime)
@@ -140,89 +132,162 @@ namespace ArrangementEditor
         g.drawHorizontalLine((int)b.getBottom() - 1, b.getX(), b.getRight());
     }
 
-void ArrangementRulerCore::drawGrid(juce::Graphics& g)
+    void ArrangementRulerCore::NumeralAtlas::prepare(float scale, const juce::Font& font,
+                                                       juce::Colour colour, int lineHeight)
     {
-        double beatDuration = 60.0 / m_bpm;
-        double barDuration = beatDuration * 4.0;
+        if (m_scale == scale)
+            return;
 
-        double viewStart = xToTime(0);
-        double viewEnd = xToTime(getWidth());
-
-        // Compute pixels-per-beat / pixels-per-bar from actual BPM + zoom
-        const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
-        const double pxPerBar  = barDuration  * m_zoom.getPixelsPerSecond();
-        const int    barStep   = GridLodPolicy::barStep(pxPerBar);
-        const bool   noBeats   = GridLodPolicy::suppressBeats(pxPerBeat);
-
-        // Seconds labels (m:ss) only when bars are spaced wide enough that the
-        // ~44 px label cannot collide with its neighbours — bars-only beyond.
-        const bool drawSeconds = pxPerBar >= 60.0;
-
-        int barStart = (int)(viewStart / barDuration);
-        int barEnd = (int)(viewEnd / barDuration) + 1;
-
-        for (int bar = barStart; bar <= barEnd; ++bar)
+        // Shape the fixed alphabet once at the current display DPI. All
+        // eleven clipped images refer to the same native bitmap, so moving
+        // into unfamiliar bars never creates a label-specific bitmap.
+        constexpr int cellWidth = 12;
+        constexpr float padding = 2.0f;
+        const int width = juce::roundToInt(std::ceil(scale * cellWidth));
+        const int height = juce::roundToInt(std::ceil(scale * lineHeight));
+        juce::Image atlas(juce::Image::ARGB, width * static_cast<int>(m_cells.size()), height, true);
         {
-            // Skip bars at extreme zoom-out to reduce GPU draw calls
-            if (barStep > 1 && (bar % barStep) != 0)
+            juce::Graphics graphics(atlas);
+            graphics.addTransform(juce::AffineTransform::scale(scale));
+            graphics.setColour(colour);
+            constexpr char symbols[] = "0123456789:";
+            const float baseline = (lineHeight - font.getHeight()) / 2.0f + font.getAscent();
+            for (size_t digit = 0; digit < m_cells.size(); ++digit)
             {
-                // Still draw bar numbers for skipped bars if they are
-                // far enough apart to be legible
-                double barTime = bar * barDuration;
-                int x = timeToX(barTime);
-                if (x >= 0 && x <= getWidth())
+                const char text[] { symbols[digit], '\0' };
+                juce::GlyphArrangement layout;
+                const float x = static_cast<float>(digit * width) / scale + padding;
+                layout.addLineOfText(font, juce::String(text), x, baseline);
+                m_cells[digit].advance = layout.getNumGlyphs() == 1
+                    ? layout.getGlyph(0).getBounds().getWidth() : 0.0f;
+                layout.draw(graphics);
+            }
+        }
+        for (size_t digit = 0; digit < m_cells.size(); ++digit)
+            m_cells[digit].graphic = atlas.getClippedImage({ static_cast<int>(digit) * width, 0, width, height });
+        m_scale = scale;
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::rulerAtlasBuilds);
+    }
+
+    bool ArrangementRulerCore::NumeralAtlas::draw(juce::Graphics& graphics,
+                                                   juce::Rectangle<int> bounds,
+                                                   int number, int seconds) const
+    {
+        if (m_scale <= 0.0f || number < 0)
+            return false;
+
+        char text[24];
+        auto* end = std::to_chars(text, text + sizeof(text) - 3, number).ptr;
+        if (seconds >= 0)
+        {
+            *end++ = ':';
+            *end++ = static_cast<char>('0' + seconds / 10);
+            *end++ = static_cast<char>('0' + seconds % 10);
+        }
+
+        float advance = 0.0f;
+        for (const char* digit = text; digit != end; ++digit)
+            advance += m_cells[static_cast<size_t>(*digit - '0')].advance;
+        if (advance > bounds.getWidth())
+            return false;
+
+        graphics.setOpacity(1.0f);
+        float x = static_cast<float>(bounds.getX()) - 2.0f;
+        const float y = static_cast<float>(bounds.getY());
+        const auto transform = juce::AffineTransform::scale(1.0f / m_scale);
+        for (const char* digit = text; digit != end; ++digit)
+        {
+            const auto& cell = m_cells[static_cast<size_t>(*digit - '0')];
+            graphics.drawImageTransformed(cell.graphic, transform.translated(x, y));
+            x += cell.advance;
+        }
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::rulerAtlasLabelDraws);
+        return true;
+    }
+
+    void ArrangementRulerCore::drawGrid(juce::Graphics& g)
+    {
+        const auto dirty = g.getClipBounds().getIntersection(getLocalBounds());
+        if (dirty.isEmpty())
+            return;
+
+        const double beatDuration = 60.0 / m_bpm;
+        const double barDuration = beatDuration * 4.0;
+        const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
+        const double pxPerBar = barDuration * m_zoom.getPixelsPerSecond();
+        if (!std::isfinite(pxPerBar) || pxPerBar <= 0.0)
+            return;
+
+        const int barStep = GridLodPolicy::barStep(pxPerBar);
+        const int labelStep = GridLodPolicy::barLabelStep(pxPerBar);
+        const bool drawBeats = !GridLodPolicy::suppressBeats(pxPerBeat);
+        const bool drawSeconds = pxPerBar >= 60.0;
+        constexpr int labelReach = 46;
+        const int firstBar = static_cast<int>(
+            xToTime(juce::jmax(0, dirty.getX() - labelReach)) / barDuration);
+        const int lastBar = static_cast<int>(xToTime(dirty.getRight()) / barDuration) + 1;
+        static const juce::Font barFont("Segoe UI", 9.f, juce::Font::plain);
+        static const juce::Font secondsFont("Segoe UI", 8.f, juce::Font::plain);
+        const auto nativeScale = g.getInternalContext().getPhysicalPixelScaleFactor();
+        const auto scale = std::clamp(std::isfinite(nativeScale) ? nativeScale : 1.0f, 1.0f, 8.0f);
+        m_barNumerals.prepare(scale, barFont, fromU32(Col::text), 14);
+        m_timeNumerals.prepare(scale, secondsFont, fromU32(Col::textDim), 12);
+        const float bottom = static_cast<float>(getHeight());
+
+        for (int bar = firstBar - firstBar % barStep; bar <= lastBar; bar += barStep)
+        {
+            const double barTime = bar * barDuration;
+            const int x = timeToX(barTime);
+            if (x >= dirty.getRight())
+                break;
+
+            if (dirty.intersects(juce::Rectangle<int>{ x, 20, 1, getHeight() - 20 }))
+            {
+                g.setColour(fromU32(Col::gridLineMajor));
+                g.drawVerticalLine(x, 20.f, bottom);
+            }
+
+            if (bar % labelStep == 0)
+            {
+                const juce::Rectangle<int> barLabel(x + 2, 4, 40, 14);
+                if (dirty.intersects(barLabel))
                 {
-                    g.setColour(fromU32(Col::text));
-                    g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
-                    g.drawText(juce::String(bar + 1), x + 2, 4, 40, 14,
-                               juce::Justification::centredLeft);
-                    if (drawSeconds)
+                    if (!m_barNumerals.draw(g, barLabel, bar + 1))
                     {
-                        g.setColour(fromU32(Col::textDim));
-                        g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
-                        g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
-                                   juce::Justification::centredLeft);
+                        g.setColour(fromU32(Col::text));
+                        g.setFont(barFont);
+                        g.drawText(juce::String(bar + 1), barLabel, juce::Justification::centredLeft);
+                    }
+                    else if (TimelinePaintMetrics::active.load(std::memory_order_relaxed)
+                             && (bar == 32 || bar == 37 || bar == 38))
+                    {
+                        TimelinePaintMetrics::rulerObservedLabels.fetch_or(
+                            uint64_t{1} << (bar - 32), std::memory_order_relaxed);
                     }
                 }
-                continue;
+                const juce::Rectangle<int> secondsLabel(x + 2, 18, 44, 12);
+                if (drawSeconds && dirty.intersects(secondsLabel))
+                {
+                    const auto total = labelSeconds(barTime);
+                    if (!m_timeNumerals.draw(g, secondsLabel, total / 60, total % 60))
+                    {
+                        g.setColour(fromU32(Col::textDim));
+                        g.setFont(secondsFont);
+                        g.drawText(juce::String::formatted("%d:%02d", total / 60, total % 60),
+                                   secondsLabel, juce::Justification::centredLeft);
+                    }
+                }
             }
 
-            double barTime = bar * barDuration;
-            int x = timeToX(barTime);
-
-            if (x < 0 || x > getWidth())
-                continue;
-
-            // Bar line — major divisions read above minor ones
-            g.setColour(fromU32(Col::gridLineMajor));
-            g.drawVerticalLine(x, 20.f, (float)getHeight());
-
-            // Bar number
-            g.setColour(fromU32(Col::text));
-            g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
-            g.drawText(juce::String(bar + 1), x + 2, 4, 40, 14,
-                       juce::Justification::centredLeft);
-
-            // Song-time seconds label (m:ss) — the user's audible clock
-            if (drawSeconds)
-            {
-                g.setColour(fromU32(Col::textDim));
-                g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
-                g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
-                           juce::Justification::centredLeft);
-            }
-
-            // Beat lines — suppressed when beats are too dense
-            if (noBeats)
+            if (!drawBeats || dirty.getBottom() <= 24)
                 continue;
 
             g.setColour(fromU32(Col::gridLine).withAlpha(0.3f));
             for (int beat = 1; beat < 4; ++beat)
             {
-                double beatTime = barTime + beat * beatDuration;
-                int beatX = timeToX(beatTime);
-                if (beatX >= 0 && beatX <= getWidth())
-                    g.drawVerticalLine(beatX, 24.f, (float)getHeight());
+                const int beatX = timeToX(barTime + beat * beatDuration);
+                if (beatX >= dirty.getX() && beatX < dirty.getRight())
+                    g.drawVerticalLine(beatX, 24.f, bottom);
             }
         }
     }

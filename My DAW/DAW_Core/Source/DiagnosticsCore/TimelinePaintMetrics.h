@@ -159,6 +159,9 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> paintCount{0};
     static inline std::atomic<uint64_t> paintOverChildrenCount{0};
     static inline std::atomic<uint64_t> rulerPaintCount{0};
+    static inline std::atomic<uint64_t> rulerAtlasBuilds{0};
+    static inline std::atomic<uint64_t> rulerAtlasLabelDraws{0};
+    static inline std::atomic<uint64_t> rulerObservedLabels{0};
     static inline std::atomic<uint64_t> toolbarPaintCount{0};
     static inline std::atomic<uint64_t> clipRenderPaints{0};
 
@@ -195,8 +198,20 @@ struct TimelinePaintMetrics
 
     // ── Counter group: waveform ─────────────────────────────────────────
     static inline std::atomic<uint64_t> waveformDrawCalls{0};
+    static inline std::atomic<uint64_t> waveformRefreshes{0};
+    static inline std::atomic<uint64_t> liveRecordingWaveformPaints{0};
+    static inline std::atomic<uint64_t> masterPreviewDirtyPixels{0};
+    static inline std::atomic<uint64_t> masterPreviewUpdateCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewPaintCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewRepaintCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewBinsDrawn{0};
+    static inline std::atomic<uint64_t> arrangementRendererRebuilds{0};
+    static inline std::atomic<uint64_t> arrangementZoomUpdates{0};
+
+    static inline SampleRing viewportZoomDurationNs;
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
     static inline std::atomic<uint64_t> waveformCachedDraws{0};
+    static inline std::atomic<uint64_t> waveformBatchedPaints{0};
 
     // ── Counter group: automation ───────────────────────────────────────
     static inline std::atomic<uint64_t> automationTimerTicks{0};
@@ -213,7 +228,10 @@ struct TimelinePaintMetrics
     // ── Sample rings for timing/area distributions ──────────────────────
     static inline SampleRing paintDurationNs;               // ArrangementViewCore::paint() duration
     static inline SampleRing paintChildrenDurationNs;       // paintOverChildren() duration
+    static inline SampleRing masterPreviewUpdateDurationNs; // Master 60Hz tick and clipping scan
+    static inline SampleRing masterPreviewPaintDurationNs;  // Master stereo columns drawn
     static inline SampleRing waveformDurationNs;            // Clip waveform draw duration
+    static inline SampleRing clipNameDurationNs;
     static inline SampleRing frameIntervalNs;               // ArrangementView 60Hz timer interval (message thread)
     static inline SampleRing requestedDirtyAreaPixelsRing;  // Per-repaint-request area (from source call sites)
     static inline SampleRing actualPaintClipAreaPixels;     // Per-paint g.getClipBounds() area
@@ -307,6 +325,9 @@ struct TimelinePaintMetrics
     {
         paintCount            = 0;
         paintOverChildrenCount = 0;
+        rulerAtlasBuilds = 0;
+        rulerAtlasLabelDraws = 0;
+        rulerObservedLabels = 0;
         rulerPaintCount       = 0;
         toolbarPaintCount     = 0;
         clipRenderPaints      = 0;
@@ -331,8 +352,18 @@ struct TimelinePaintMetrics
         arrangementScrollPartialRepaints = 0;
         arrangementScrollDirtyAreaPixels = 0;
         waveformDrawCalls     = 0;
+        waveformRefreshes     = 0;
+        liveRecordingWaveformPaints = 0;
+        masterPreviewDirtyPixels = 0;
+        masterPreviewUpdateCalls = 0;
+        masterPreviewPaintCalls = 0;
+        masterPreviewRepaintCalls = 0;
+        masterPreviewBinsDrawn = 0;
+        arrangementRendererRebuilds = 0;
+        arrangementZoomUpdates = 0;
         waveformPeaksWalked   = 0;
         waveformCachedDraws   = 0;
+        waveformBatchedPaints = 0;
         automationTimerTicks  = 0;
         automationTimerSkipped = 0;
         automationTimerInvalidated = 0;
@@ -345,6 +376,10 @@ struct TimelinePaintMetrics
         paintDurationNs.reset();
         paintChildrenDurationNs.reset();
         waveformDurationNs.reset();
+        masterPreviewUpdateDurationNs.reset();
+        masterPreviewPaintDurationNs.reset();
+        viewportZoomDurationNs.reset();
+        clipNameDurationNs.reset();
         frameIntervalNs.reset();
         requestedDirtyAreaPixelsRing.reset();
         actualPaintClipAreaPixels.reset();

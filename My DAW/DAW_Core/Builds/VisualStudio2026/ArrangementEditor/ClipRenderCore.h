@@ -22,7 +22,7 @@ namespace ArrangementEditor
     {
     public:
         ClipRenderCore(ArrangementClipModel& model,
-                       ArrangementZoomCore& zoom,
+                       const TimelineZoomController& zoom,
                        DAW::AudioFileManager::CachedAudioHandle cachedAudio = {},
                        bool allowFileFallback = true);
         ~ClipRenderCore() override;
@@ -78,6 +78,14 @@ namespace ArrangementEditor
                     || m_clipData.sourceEndSample != data.sourceEndSample
                     || m_clipData.processedWaveformVersion != data.processedWaveformVersion;
 
+                // A rename changes the text's true horizontal extent.
+                // Invalidate the preflight clip-name cull before the next
+                // paint, otherwise long labels could disappear offscreen.
+                if (m_clipData.clipName != data.clipName)
+                {
+                    measuredClipName = {};
+                    measuredClipNameWidth = 0;
+                }
                 m_clipData = data;
                 m_clipId   = data.id;
                 m_model    = &m_clipData;  // keep pointer valid
@@ -124,7 +132,6 @@ namespace ArrangementEditor
     // Scroll/gesture LOD: while a pan or pinch is running every renderer stops
     // after its background + header, so each frame stays cheap and the gesture
     // is smooth. Full detail (waveform, badges, fades) returns on release.
-    static inline std::atomic<bool> s_lightweightPaint { false };
 
         // Interactive handle callbacks — wired by ArrangementViewCore
         // onEditBegin: called when user starts dragging a fade/resize handle.
@@ -186,7 +193,7 @@ namespace ArrangementEditor
         ArrangementClipModel* m_model = &m_clipData;   // always points to m_clipData
         juce::Uuid             m_clipId;                // stable copy of clip ID
         double                 engineSampleRate_ = 44100.0;
-        ArrangementZoomCore&  m_zoom;
+        const TimelineZoomController&  m_zoom;
         DAW::AudioFileManager::CachedAudioHandle m_cachedAudio;
         bool m_allowFileFallback = true;
 
@@ -261,12 +268,13 @@ namespace ArrangementEditor
 
         // DEBUG: Paint counter to verify paint() is actually being called
         mutable int m_paintDebugCounter = 0;
-        int m_lastWaveformRequestWidth = -1;
-        bool m_lastWaveformRenderable = false;
 
         // NAME_H: height reserved at top for clip name label
         // Waveform starts below this so name never overlaps waveform.
         static constexpr int kNameH = 16;
+
+        juce::String measuredClipName;
+        int measuredClipNameWidth = 0;
 
         void drawBackground(juce::Graphics& g);
         void drawWaveform(juce::Graphics& g);
