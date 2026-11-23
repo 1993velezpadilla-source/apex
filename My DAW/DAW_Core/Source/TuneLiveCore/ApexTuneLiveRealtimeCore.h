@@ -55,6 +55,7 @@ public:
         outgoing_ = {};
         envelope_.fill(0.0);
         lastCorrection_.fill(0.0);
+        lastDry_.fill(0.0);
         releaseOffset_.fill(0.0);
         position_ = filled_ = 0;
         targetShift_ = shift_ = confidence_ = wet_ = releaseAmount_ = 0.0;
@@ -216,11 +217,28 @@ public:
                 const double maxCorrectionStep =
                     researchPhaseSlew_ && (weakModel || outgoingTransition)
                         ? 0.034 : 0.18;
-                const double correction = std::clamp(
+                double correction = std::clamp(
                     delta[channel], lastCorrection_[channel] - maxCorrectionStep,
                     lastCorrection_[channel] + maxCorrectionStep);
+                if (researchPhaseSlew_ && (weakModel || outgoingTransition))
+                {
+                    // The previous correction-only guard still allowed
+                    // synthetic and dry derivatives to add constructively.
+                    // Bound the COMBINED output step, while never restricting
+                    // the slope of a genuine dry consonant on its own.
+                    const double drySlope = input[channel] - lastDry_[channel];
+                    const double requestedOutputSlope =
+                        drySlope + correction - lastCorrection_[channel];
+                    const double allowedOutputSlope =
+                        std::max(0.035, std::abs(drySlope) + 0.004);
+                    correction += std::clamp(requestedOutputSlope,
+                        -allowedOutputSlope, allowedOutputSlope)
+                        - requestedOutputSlope;
+                }
                 data[c][i] = static_cast<float>(std::clamp(input[channel] + correction, -8.0, 8.0));
                 lastCorrection_[channel] = static_cast<double>(data[c][i]) - input[channel];
+                if (researchPhaseSlew_)
+                    lastDry_[channel] = input[channel];
             }
         }
     }
@@ -608,7 +626,7 @@ private:
     VoiceControl voice_;
     std::array<std::array<float, 2>, kHistory> history_{};
     Bank bank_{}, outgoing_{};
-    Sample envelope_{}, lastCorrection_{}, releaseOffset_{};
+    Sample envelope_{}, lastCorrection_{}, lastDry_{}, releaseOffset_{};
     double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
     double correctionRestoreStep_ = 0.0;
     double phaseSlewStep_ = 0.0, phaseHz_ = 0.0;
