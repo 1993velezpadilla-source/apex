@@ -3876,3 +3876,25 @@ constexpr bool phoneTrackListNeverConsumesTimelineOnRotation = []() constexpr {
 }();
 static_assert(phoneTrackListNeverConsumesTimelineOnRotation);
 
+
+// Android may deliver a duplicate mouseDown for the same input source.
+// It must cancel the pending Transport launcher, not count as a new tap;
+// after the contact is released, a fresh tap with the same source can work.
+constexpr bool phoneTransportDuplicateSourceCannotRearm = []() constexpr {
+    using DAW::mobile::PhoneTransportTapState;
+    for (int source : { 0, 1, 15, 99 })
+    {
+        PhoneTransportTapState state{};
+        state.begin(2, source);
+        state.begin(2, source);
+        if (!state.blocked || state.eligible || state.activeCount != 1)
+            return false;
+        if (state.release(source, 2, 0, 0)) return false;
+        if (state.activeCount != 0 || state.blocked) return false;
+        state.begin(2, source);
+        if (!state.release(source, 2, 0, 0)) return false;
+        if (state.release(source, 2, 0, 0)) return false;
+    }
+    return true;
+}();
+static_assert(phoneTransportDuplicateSourceCannotRearm);
