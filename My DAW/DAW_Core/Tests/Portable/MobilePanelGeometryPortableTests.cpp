@@ -3847,3 +3847,32 @@ constexpr bool phoneWheelCarryResetsOnScaleWithoutResize = []() constexpr {
         && carry.pixelsPerSecond == -1.0 && carry.laneHeight == -1.0;
 }();
 static_assert(phoneWheelCarryResetsOnScaleWithoutResize);
+
+// Portrait/landscape and split-screen Track List must leave at least one
+// Arrangement unit visible, including extreme restored widths. The requested
+// width is a cap; a negative or zero request never opens a phantom sidebar.
+constexpr bool phoneTrackListNeverConsumesTimelineOnRotation = []() constexpr {
+    using DAW::mobile::phoneTrackListWidth;
+    constexpr int huge = std::numeric_limits<int>::max();
+    for (int workspace : { std::numeric_limits<int>::min(), -1, 0, 1,
+                           2, 44, 108, 320, 393, 844, huge })
+        for (int requested : { std::numeric_limits<int>::min(), -1, 0,
+                               1, 44, 108, 320, huge })
+        {
+            const int width = phoneTrackListWidth(requested, workspace);
+            if (width < 0) return false;
+            if (requested <= 0 || workspace <= 1)
+            {
+                if (width != 0) return false;
+            }
+            else if (width > requested || width >= workspace)
+                return false;
+        }
+    // A restored wide Track List must shrink on rotation and expand again
+    // without ever covering the entire timeline.
+    return phoneTrackListWidth(320, 393) == 108
+        && phoneTrackListWidth(320, 844) == 211
+        && phoneTrackListWidth(320, 2) == 1;
+}();
+static_assert(phoneTrackListNeverConsumesTimelineOnRotation);
+
