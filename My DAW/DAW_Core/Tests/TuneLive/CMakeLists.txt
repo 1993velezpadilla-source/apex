@@ -26,3 +26,18 @@ target_link_libraries(TuneLiveNativeRuntimeSmoke PRIVATE
 if(MSVC)
     target_compile_options(TuneLiveNativeRuntimeSmoke PRIVATE /bigobj /utf-8)
 endif()
+
+# Separately packaged research GUI; never registers an APEX Native plugin.
+juce_add_gui_app(TuneLiveResearchMonitor PRODUCT_NAME "APEX Tune Live Research Monitor")
+target_sources(TuneLiveResearchMonitor PRIVATE tune_live_research_monitor.cpp)
+target_include_directories(TuneLiveResearchMonitor PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../JuceLibraryCode"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../Source/ThirdParty"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../Source/ThirdParty/signalsmith-stretch")
+target_compile_definitions(TuneLiveResearchMonitor PRIVATE
+    JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_ASIO=0 JUCE_PLUGINHOST_VST3=0)
+target_link_libraries(TuneLiveResearchMonitor PRIVATE juce::juce_audio_utils
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+if(MSVC)
+    target_compile_options(TuneLiveResearchMonitor PRIVATE /bigobj /utf-8)
+endif()
