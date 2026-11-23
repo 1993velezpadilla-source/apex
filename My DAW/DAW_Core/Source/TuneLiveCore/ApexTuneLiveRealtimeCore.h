@@ -245,10 +245,14 @@ private:
         targetShift_ = decision.shiftSemitones;
         if (retune_ == 0.0f && newShift)
         {
-            // A new bank starts in phase with the source. Set its pitch
-            // before it renders the first sample, while the wet gain fades in.
             if (onset)
+            {
                 shift_ = targetShift_;
+                // Anchor both oscillators at the beginning of the fitted
+                // input cycle. The destination has advanced through that
+                // cycle at the corrected rate when the wet fade begins.
+                bank_.destination = Phase::rotate(kTau * (std::exp2(shift_ / 12.0) - 1.0));
+            }
             beginFastRetune();
         }
         confidence_ = std::clamp((pitch.confidence - 0.77) / 0.19, 0.0, 1.0);

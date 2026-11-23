@@ -116,7 +116,7 @@ bool testPitchAndOnset() {
             const double cents = measuredCents(wet, rate, target);
             std::cout << "rate=" << rate << " target_hz=" << target
                       << " output_cents=" << cents << " changed_pcm_ms=" << onsetMs << '\n';
-            if (std::abs(cents) > 4.0 || onsetMs > 50.0 || engine.latencySamples() != 0)
+            if (std::abs(cents) > 4.0 || onsetMs > 35.0 || engine.latencySamples() != 0)
                 return false;
         }
     }
