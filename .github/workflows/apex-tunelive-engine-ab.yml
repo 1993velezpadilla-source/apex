@@ -1,0 +1,64 @@
+name: APEX Tune Live independent engine comparison
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/mobile-portrait-tunelive-20261123]
+    paths:
+      - '.github/workflows/apex-tunelive-engine-ab.yml'
+      - 'My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_engine_ab.cpp'
+permissions:
+  contents: read
+jobs:
+  ab-reference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Fetch pinned reference into CI temp directory, never into APEX
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/flayr"
+          git -C "$RUNNER_TEMP/flayr" init
+          git -C "$RUNNER_TEMP/flayr" fetch --depth 1 https://github.com/FlayrLabs/flayr-tune.git 4bd2454177888b7566fb4ce667ba078662d9cd25
+          git -C "$RUNNER_TEMP/flayr" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/flayr" rev-parse HEAD)" = "4bd2454177888b7566fb4ce667ba078662d9cd25"
+          grep -q 'GNU AFFERO GENERAL PUBLIC LICENSE' "$RUNNER_TEMP/flayr/LICENSE"
+      - name: Build isolated APEX and Flayr research executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_engine_ab.cpp'
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem 'My DAW/DAW_Core/Source/ThirdParty' \
+            -isystem 'My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch' \
+            "$SRC" -o /tmp/apex_engine_ab
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -DAPEX_FLAYR \
+            -I "$RUNNER_TEMP/flayr/Source" "$SRC" -o /tmp/flayr_engine_ab
+      - name: Render A/B WAV and CPU PCM telemetry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tune-engine-ab/apex tune-engine-ab/flayr
+          /tmp/apex_engine_ab tune-engine-ab/apex | tee tune-engine-ab/apex.jsonl
+          /tmp/flayr_engine_ab tune-engine-ab/flayr | tee tune-engine-ab/flayr.jsonl
+          python3 - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('tune-engine-ab')
+          results=[json.loads(line) for name in ('apex','flayr')
+                   for line in (root/(name+'.jsonl')).read_text().splitlines()]
+          assert len(results)==4,results
+          assert all(r['frames']==192000 and r['nonfinite']==0 for r in results)
+          (root/'comparison.json').write_text(json.dumps({
+              'comparison':'Synthetic PCM fixture, not Android device xrun evidence',
+              'reference_sha':'4bd2454177888b7566fb4ce667ba078662d9cd25','runs':results},indent=2))
+          print('Independent A/B results validated, four modes')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: APEX-TuneLive-Engine-AB-WAV-and-Metrics
+          path: tune-engine-ab
+          if-no-files-found: error
+          retention-days: 14
