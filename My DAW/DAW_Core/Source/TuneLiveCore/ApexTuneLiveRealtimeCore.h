@@ -28,6 +28,15 @@ public:
         wetStep_ = 1.0 / (0.0015 * rate_ + 1.0);
         formantStep_ = 1.0 / (0.003 * rate_ + 1.0);
         agreementStep_ = 1.0 / (0.00030 * rate_ + 1.0);
+        // Short detector gaps must fade correction but preserve the fitted
+        // waveform. An immediate bank tear-down on every missed 1-ms hop
+        // clicks on breathy syllables and vowel/consonant transitions.
+        unvoicedHoldHops_ = std::max(2, static_cast<int>(
+            std::ceil(0.018 * rate_ / tracker_.hopSamples())));
+        // A fast transient clamp and slower recovery prevent gain zipper
+        // noise while keeping consonant protection responsive.
+        correctionSuppressStep_ = 1.0 / (0.0005 * rate_ + 1.0);
+        correctionRestoreStep_ = 1.0 / (0.004 * rate_ + 1.0);
         decaySamples_ = std::max(2, static_cast<int>(std::ceil(0.0015 * rate_)));
         neutralHoldSamples_ = static_cast<int>(std::lround(0.045 * rate_));
         reset();
@@ -47,6 +56,8 @@ public:
         targetShift_ = shift_ = confidence_ = wet_ = releaseAmount_ = 0.0;
         retune_ = -1.0f;
         controlLeft_ = decayLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
+        missingPitchHops_ = 0;
+        waveformReleaseCount_ = 0;
         frequency_ = 0.0f;
     }
 
@@ -54,6 +65,8 @@ public:
     float frequencyHz() const noexcept { return frequency_; }
     double correctionMix() const noexcept { return wet_; }
     double appliedShiftSemitones() const noexcept { return shift_; }
+    // Read after processing (test/diagnostic only; no cross-thread contract).
+    unsigned waveformReleaseCount() const noexcept { return waveformReleaseCount_; }
 
     void process(float* const* data, int channels, int samples, const DspSettings& settings) noexcept
     {
@@ -225,15 +238,18 @@ private:
 
     void followPitch(PitchTracker::Result pitch, VoiceSettings policy, bool preserveFormants) noexcept
     {
+        if (!pitch.voiced || !std::isfinite(pitch.hz) || pitch.hz <= 0.0f)
+        {
+            handlePitchLoss();
+            return;
+        }
         const auto decision = voice_.update(pitch, policy);
         if (!decision.voiced)
         {
-            if (bank_.size > 0)
-                releaseWaveform();
-            frequency_ = 0.0f;
-            targetShift_ = confidence_ = 0.0;
+            handlePitchLoss();
             return;
         }
+        missingPitchHops_ = 0;
 
         if (bank_.size > 0 && (pitch.hz > bank_.hz * 1.19 || pitch.hz * 1.19 < bank_.hz))
             releaseWaveform();
@@ -277,6 +293,19 @@ private:
         if (onset)
             initialiseWaveform();
         updateEnvelope(preserveFormants);
+    }
+
+    void handlePitchLoss() noexcept
+    {
+        frequency_ = 0.0f;
+        confidence_ = 0.0; // smoothly return the current consonant to dry
+        if (bank_.size == 0)
+            return;
+        if (++missingPitchHops_ < unvoicedHoldHops_)
+            return;
+        targetShift_ = 0.0;
+        voice_.reset();
+        releaseWaveform();
     }
 
     void advanceControl() noexcept
@@ -397,7 +426,11 @@ private:
             constexpr double tolerance = 0.08;
             constexpr double transitionWidth = 0.45;
             const double fade = std::clamp((mismatch - tolerance) / transitionWidth, 0.0, 1.0);
-            bank_.correctionGain[channel] = 1.0 - fade * fade * (3.0 - 2.0 * fade);
+            const double requestedGain = 1.0 - fade * fade * (3.0 - 2.0 * fade);
+            auto& correctionGain = bank_.correctionGain[channel];
+            const double gainStep = requestedGain < correctionGain
+                ? correctionSuppressStep_ : correctionRestoreStep_;
+            correctionGain += gainStep * (requestedGain - correctionGain);
             for (int h = 0; h < bank_.size; ++h)
             {
                 const auto bin = static_cast<std::size_t>(h);
@@ -412,12 +445,14 @@ private:
 
     void releaseWaveform() noexcept
     {
+        ++waveformReleaseCount_;
         outgoing_ = bank_;
         bank_ = {};
         decayLeft_ = decaySamples_;
         releaseAmount_ = wet_;
         wet_ = shift_ = 0.0;
         controlLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
+        missingPitchHops_ = 0;
     }
 
     Sample renderOutgoing(double mix) noexcept
@@ -462,6 +497,7 @@ private:
     Bank bank_{}, outgoing_{};
     Sample envelope_{}, lastCorrection_{}, releaseOffset_{};
     double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
+    double correctionSuppressStep_ = 0.0, correctionRestoreStep_ = 0.0;
     double targetShift_ = 0.0, shift_ = 0.0, confidence_ = 0.0, wet_ = 0.0;
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
     double fastRetuneStart_ = 0.0, fastRetuneProgress_ = 0.0, fastWetStep_ = 0.0;
@@ -470,6 +506,8 @@ private:
     int channels_ = 1, decaySamples_ = 2, decayLeft_ = 0, controlLeft_ = 0;
     int neutralHoldSamples_ = 0, neutralLeft_ = 0;
     int fastRetuneSamples_ = 0, fastRetuneLeft_ = 0;
+    int unvoicedHoldHops_ = 2, missingPitchHops_ = 0;
+    unsigned waveformReleaseCount_ = 0;
     bool prepared_ = false;
 };
 

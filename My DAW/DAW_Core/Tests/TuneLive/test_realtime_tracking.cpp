@@ -345,6 +345,45 @@ bool testRealtimeSafety() {
               << " callback_cpp_allocations=" << allocations.load() << '\n';
     return clean && allocations.load() == 0 && engines[0].frequencyHz() > 100.0f;
 }
+
+bool testDetectorDropoutStability() {
+    constexpr int rate = 48000;
+    auto dry = makeVoice(rate, 447.691, rate * 2);
+    // Airy singing: a brief 8-ms unvoiced hole followed by a later real
+    // 150-ms pause. The first must not repeatedly recreate the oscillator.
+    const int briefBegin = rate / 2, briefEnd = briefBegin + rate / 125;
+    const int longBegin = rate + rate / 4, longEnd = longBegin + rate * 15 / 100;
+    std::fill(dry.begin() + briefBegin, dry.begin() + briefEnd, 0.0f);
+    std::fill(dry.begin() + longBegin, dry.begin() + longEnd, 0.0f);
+    auto wet = dry;
+    RealtimeCore engine;
+    engine.prepare(rate, 1);
+    const auto settings = hardTune();
+    unsigned shortReleases = 0, longReleases = 0;
+    double largestCorrectionStep = 0.0;
+    bool finite = true;
+    for (int offset = 0; offset < static_cast<int>(wet.size());) {
+        const int count = std::min(127, static_cast<int>(wet.size()) - offset);
+        float* audio[]{wet.data() + offset};
+        engine.process(audio, 1, count, settings);
+        if (offset <= briefEnd + rate / 25 && offset + count > briefEnd + rate / 25)
+            shortReleases = engine.waveformReleaseCount();
+        if (offset <= longEnd && offset + count > longEnd)
+            longReleases = engine.waveformReleaseCount();
+        offset += count;
+    }
+    for (std::size_t i = 1; i < wet.size(); ++i) {
+        finite &= std::isfinite(wet[i]);
+        const double change = (static_cast<double>(wet[i]) - dry[i])
+                             - (static_cast<double>(wet[i - 1]) - dry[i - 1]);
+        largestCorrectionStep = std::max(largestCorrectionStep, std::abs(change));
+    }
+    std::cout << "Tracking airy-voice short_drop_bank_releases=" << shortReleases
+              << " sustained_silence_releases=" << longReleases
+              << " max_correction_step=" << largestCorrectionStep << '\n';
+    return finite && shortReleases == 0 && longReleases >= 1
+           && largestCorrectionStep < 0.24;
+}
 } // namespace
 
 int main() {
@@ -354,4 +393,5 @@ int main() {
     if (!testVibrato()) { std::cerr << "Vibrato preservation\n"; return 3; }
     if (!testNoteTransitions()) { std::cerr << "Excessive note-transition peak or correction step\n"; return 5; }
     if (!testRealtimeSafety()) { std::cerr << "Stereo isolation or realtime allocations\n"; return 4; }
+    if (!testDetectorDropoutStability()) { std::cerr << "Tracking pitch dropout click guard\n"; return 7; }
 }
