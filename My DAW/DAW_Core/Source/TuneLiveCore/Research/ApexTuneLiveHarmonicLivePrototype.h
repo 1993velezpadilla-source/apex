@@ -290,11 +290,13 @@ public:
                 // The frequency bounds stay constant between detector frames.
                 Unit src=phaseSource_,out=phaseOutput_;
                 for(int h=0;h<activeHarmonics_;++h) {
+                    const double inputGain=2.0*harmonicGain_[static_cast<std::size_t>(h)];
                     for(int c=0;c<channels_;++c) {
                         const auto channel=static_cast<std::size_t>(c);
                         auto& p=partials_[channel][static_cast<std::size_t>(h)];
-                        p.cosine+=partialStep_*(2.0*dry[channel]*src.real-p.cosine);
-                        p.sine+=partialStep_*(2.0*dry[channel]*src.imag-p.sine);
+                        const double input=static_cast<double>(dry[channel])*inputGain;
+                        p.cosine+=partialStep_*(input*src.real-p.cosine);
+                        p.sine+=partialStep_*(input*src.imag-p.sine);
                         synth[channel]+=
                             p.cosine*out.real+p.sine*out.imag;
                         unshifted[channel]+=
@@ -427,8 +429,9 @@ private:
                 for(int c=0;c<channels_;++c) {
                     const auto channel=static_cast<std::size_t>(c);
                     auto& partial=partials_[channel][static_cast<std::size_t>(h)];
-                    partial.cosine+=weights[channel]*harmonic.real;
-                    partial.sine+=weights[channel]*harmonic.imag;
+                    const double weight=weights[channel]*harmonicGain_[static_cast<std::size_t>(h)];
+                    partial.cosine+=weight*harmonic.real;
+                    partial.sine+=weight*harmonic.imag;
                 }
                 harmonic=multiply(harmonic,pastPhase);
             }
@@ -532,12 +535,18 @@ private:
                 : 3.0;
             minimumVoicedSamples_=static_cast<int>(requiredCycles*rate_/sourceHz_);
             activeWetStep_=fastVoice?fastWetStep_:slowWetStep_;
-            // Both oscillators must stay in band, including when shifting down.
+            // Leave upper-band articulation in the direct residual. Taper
+            // modeled harmonics approaching the band edge when the note glides.
             const double higherFrequency=std::max(sourceHz_,targetHz_);
+            const double bandEdge=std::min(rate_*0.46,5500.0);
             const int previousHarmonics=activeHarmonics_;
             activeHarmonics_=kHarmonics;
-            while(activeHarmonics_*higherFrequency>=rate_*0.46)
+            while(activeHarmonics_*higherFrequency>=bandEdge)
                 --activeHarmonics_;
+            for(int h=0;h<activeHarmonics_;++h) {
+                harmonicGain_[static_cast<std::size_t>(h)]=std::clamp(
+                    (bandEdge-(h+1)*higherFrequency)/250.0,0.0,1.0);
+            }
             for(int c=0;c<channels_;++c)
                 for(int h=activeHarmonics_;h<previousHarmonics;++h)
                     partials_[static_cast<std::size_t>(c)][static_cast<std::size_t>(h)]={};
@@ -595,6 +604,7 @@ private:
     std::array<std::array<float,2>,kHistorySize> inputHistory_{};
     std::size_t detectorChannel_=0;
     Harmonics partials_{},releasePartials_{};
+    std::array<double,kHarmonics> harmonicGain_{};
     std::array<double,2> lastCorrection_{},releaseOffset_{};
     Unit phaseSource_{},phaseOutput_{},stepSource_{},stepOutput_{};
     Unit releaseSource_{},releaseOutput_{},releaseSourceStep_{},releaseOutputStep_{};

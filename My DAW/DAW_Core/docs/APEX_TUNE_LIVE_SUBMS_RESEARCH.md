@@ -200,6 +200,8 @@ loss or a note leap, a one-millisecond crossfade releases the previous
 harmonic model while the input continues at its original sample position.
 The per-sample shifter uses cached harmonic and engagement limits, and
 the short YIN analysis uses vectorizable double-precision reductions.
+The harmonic model tapers out below 5.5 kHz, leaving higher-frequency
+articulation in the input residual.
 Suspected upward octaves in active vocals also check the recent input for
 coherent odd harmonics. This keeps a strong second harmonic from replacing
 the fundamental during a note and retains fast acquisition for genuine
@@ -210,12 +212,12 @@ At 48 kHz in the guarded A4 +30-cent mono regression:
 | Measurement | Prior prototype | Desktop candidate |
 | --- | ---: | ---: |
 | First pitch estimate | 6.98 ms | 6.31 ms |
-| First 1 ms window with a measurable output change (start) | 7.58 ms | 6.21 ms |
+| First 1 ms window with a measurable output change (start) | 7.58 ms | 6.42 ms |
 | Corrective mix reaches 50% | 8.75 ms | 7.00 ms |
-| Steady output error | 2.70 cents | 2.68 cents |
+| Steady output error | 2.70 cents | 1.57 cents |
 | Fixed transient delay with correction engaged | 0 samples | 0 samples |
 
-The candidate's output-change window completes at 7.19 ms. The test
+The candidate's output-change window completes at 7.40 ms. The test
 also verifies the timing at 44.1, 96 and 192 kHz. The leap test now
 measures the correction discontinuity after subtracting the input step.
 At 48 kHz the discontinuity fell from 0.3504 to below 0.000001 on that
@@ -223,5 +225,13 @@ fixture.
 
 In Vocadito's higher-register recording, a passage near 400 Hz previously
 triggered an incorrect estimate near 800 Hz. The detector regression now
-checks both the false-octave case and a genuine octave transition. Blind
-vocal quality checks and physical Apollo Solo round-trip testing remain open.
+checks both the false-octave case and a genuine octave transition. Across
+all 40 Vocadito recordings (up to 15 seconds each), independent analysis
+of stable voiced frames found 50 octave discrepancies, matching the prior
+prototype. The intermediate untapered candidate had 57. Blind vocal
+quality checks and physical Apollo Solo round-trip testing remain open.
+
+In the local eight-insert callback benchmark, the median of 12 runs'
+reported p95 at 48 kHz fell from 0.932 ms to 0.664 ms. No callback heap
+allocations were observed. The shared test environment still recorded
+callback deadline misses at 96 kHz.
