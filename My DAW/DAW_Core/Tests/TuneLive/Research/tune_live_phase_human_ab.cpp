@@ -11,7 +11,7 @@
 namespace {
 struct Report {
     Wave wave;
-    double maxStep=0,peak=0,p95=0,medianCents=0;
+    double maxStep=0,peak=0,p95=0,medianCents=0,rms=0;
     double dryMaxStep=0, maxCorrectionStep=0, maxAddedStep=0;
     std::size_t worstIndex=0, worstAddedIndex=0, addedStepEvents=0;
     int invalid=0,budget=0;
@@ -53,9 +53,11 @@ Report render(const Wave& source,bool research) {
         }
     }
     result.p95=median(times,.95);
+    double outputEnergy=0;
     for(std::size_t i=0;i<result.wave.data.size();++i) {
         const double x=result.wave.data[i];
         if(!std::isfinite(x)){++result.invalid;continue;}
+        outputEnergy += x*x;
         result.peak=std::max(result.peak,std::abs(x));
         if(i>=static_cast<std::size_t>(source.channels)) {
             const double outputStep=std::abs(x-result.wave.data[i-source.channels]);
@@ -90,6 +92,7 @@ Report render(const Wave& source,bool research) {
         const double midi=69.0+12*std::log2(pitch.hz/440.0);
         deviations.push_back(100.0*std::abs(midi-std::round(midi)));
     }
+    result.rms=std::sqrt(outputEnergy/std::max<std::size_t>(1,result.wave.data.size()));
     result.medianCents=median(std::move(deviations),.5);
     return result;
 }
@@ -107,6 +110,7 @@ void print(const char* mode,const Report& r) {
             r.worstAddedIndex/r.wave.channels)/r.wave.rate
         <<",\"likely_added_click_steps\":"<<r.addedStepEvents
         <<",\"peak\":"<<r.peak
+        <<",\"rms\":"<<r.rms
         <<",\"nearest_tet_cents_median\":"<<r.medianCents
         <<",\"callback_p95_ms\":"<<r.p95
         <<",\"callback_over_budget\":"<<r.budget

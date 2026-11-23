@@ -154,8 +154,14 @@ jobs:
               assert before['mode']=='original' and after['mode']=='phase_research'
               assert before['nonfinite']==after['nonfinite']==0
               assert after['max_added_step_over_dry'] <= before['max_added_step_over_dry'] * .70, (voice,rows)
-              assert after['max_step'] <= before['max_step']*1.02, (voice,rows)
-              assert after['likely_added_click_steps'] <= before['likely_added_click_steps']*1.15, (voice,rows)
+              # Gross output sample slopes can come directly from licensed
+              # singer harmonics/consonants. Require no significant added
+              # broadband excursion beyond the exact source's max slope.
+              # The stricter guard is on *correction-added* steps.
+              assert after['max_step'] <= after['dry_max_step'] + .030, (voice,rows)
+              # Prevent a trivial 'mute the wet engine' improvement.
+              assert .85 <= after['rms']/max(before['rms'],1e-9) <= 1.15, (voice,rows)
+              assert after['likely_added_click_steps'] <= before['likely_added_click_steps']*.80, (voice,rows)
               assert after['nearest_tet_cents_median'] <= before['nearest_tet_cents_median']+3.0, (voice,rows)
               print('REAL_SINGER_RESEARCH_GUARD_PASS',voice,
                     'added_step',before['max_added_step_over_dry'],'->',after['max_added_step_over_dry'],
