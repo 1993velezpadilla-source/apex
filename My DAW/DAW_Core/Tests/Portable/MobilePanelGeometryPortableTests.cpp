@@ -3669,3 +3669,29 @@ constexpr bool pluginBrowserScrollbarBoundaryRegression = []() constexpr {
     return true;
 }();
 static_assert(pluginBrowserScrollbarBoundaryRegression);
+
+
+// Phone plugin-browser scrollbar thickness may be restored from a different
+// display density. Negative and oversized values must never steal list width;
+// desktop/iPad geometry is unaffected by this phone-focused regression.
+constexpr bool pluginBrowserScrollbarThicknessClamps = []() constexpr {
+    using DAW::mobile::pluginBrowserListWidth;
+    constexpr int huge = std::numeric_limits<int>::max();
+    for (int width : { 1, 11, 12, 44, 393, huge })
+        for (int thickness : { std::numeric_limits<int>::min(), -1, 0,
+                               1, 12, 44, huge })
+        {
+            const int clamped = thickness < 0 ? 0
+                : thickness > width ? width : thickness;
+            // Two 44-high rows overflow a 44-high viewport.
+            if (pluginBrowserListWidth(width, 44, 2, 44, thickness)
+                != width - clamped)
+                return false;
+            // Exact fit and invalid rows must never reserve a scrollbar.
+            if (pluginBrowserListWidth(width, 88, 2, 44, thickness) != width
+                || pluginBrowserListWidth(width, 44, -1, 44, thickness) != width)
+                return false;
+        }
+    return true;
+}();
+static_assert(pluginBrowserScrollbarThicknessClamps);
