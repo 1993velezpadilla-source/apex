@@ -203,7 +203,19 @@ public:
                 // 0.18 FS/sample exceeds the normal note-transition peak
                 // measured by the existing tracking gauntlet (~0.162), but
                 // eliminates the 0.28-FS dropout pop without buffering/PDC.
-                constexpr double maxCorrectionStep = 0.18;
+                // Experimental transition safety: a sudden loss of model
+                // agreement means the synthetic correction can collapse
+                // by >0.1 FS in one sample, even before a new pitch is
+                // detected. Hold the *correction derivative* to the normal
+                // harmonic-band scale during those rare transitions. This
+                // never touches the dry sample, and the shipping branch
+                // keeps its existing, wider 0.18 protection unchanged.
+                const bool weakModel = bank_.size > 0 &&
+                    bank_.correctionGain[channel] < 0.80;
+                const bool outgoingTransition = decayLeft_ > 0 && outgoing_.size > 0;
+                const double maxCorrectionStep =
+                    researchPhaseSlew_ && (weakModel || outgoingTransition)
+                        ? 0.034 : 0.18;
                 const double correction = std::clamp(
                     delta[channel], lastCorrection_[channel] - maxCorrectionStep,
                     lastCorrection_[channel] + maxCorrectionStep);
