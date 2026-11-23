@@ -243,7 +243,9 @@ constexpr int phoneMixerLeftChromeButtonAt(float x, float y,
         return 0;
     const float firstCentre = static_cast<float>(padLeft)
                             + static_cast<float>(buttonSize) * 0.5f;
-    const float separation = static_cast<float>(buttonSize + buttonGap);
+    // Cast before addition: restored chrome sizes must not overflow signed int.
+    const float separation = static_cast<float>(buttonSize)
+                           + static_cast<float>(buttonGap);
     const float boundary = firstCentre + separation * 0.5f;
     const float touchWidth = separation * 1.5f;
     const float firstLeft = boundary > touchWidth ? boundary - touchWidth : 0.0f;
@@ -251,6 +253,9 @@ constexpr int phoneMixerLeftChromeButtonAt(float x, float y,
         return 1;
     return x >= boundary && x < boundary + touchWidth ? 2 : 0;
 }
+// Regression: even corrupted chrome dimensions must not overflow C++ int.
+static_assert(phoneMixerLeftChromeButtonAt(18.0f, 8.0f, 12,
+    std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 32) == 1);
 
 // Keep the phone mixer's original left traffic lights and right toolbar
 // unobscured by the cyan/violet header energy overlay. The overlay is a
