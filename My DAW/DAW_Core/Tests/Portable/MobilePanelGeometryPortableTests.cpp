@@ -3776,3 +3776,39 @@ constexpr bool phoneTransportOverflowCannotRearmLauncher = []() constexpr {
     return !state.release(100, 1, 0, 0);
 }();
 static_assert(phoneTransportOverflowCannotRearmLauncher);
+
+
+// Phone Transport: a second contact must cancel the first launcher even
+// when the second finger lifts before the first. A fresh gesture after both
+// releases must work, including reuse of the same JUCE source index.
+constexpr bool phoneTransportTwoFingerReleaseOrderRegression = []() constexpr {
+    using DAW::mobile::PhoneTransportTapState;
+    for (int first : { 0, 1, 15, 99 })
+        for (int second : { 2, 16, 100 })
+        {
+            if (first == second) continue;
+            for (int releaseFirst : { 0, 1 })
+            {
+                PhoneTransportTapState state{};
+                state.begin(2, first);
+                state.begin(3, second);
+                if (releaseFirst)
+                {
+                    if (state.release(first, 2, 0, 0)) return false;
+                    if (state.release(second, 3, 0, 0)) return false;
+                }
+                else
+                {
+                    if (state.release(second, 3, 0, 0)) return false;
+                    if (state.release(first, 2, 0, 0)) return false;
+                }
+                if (state.activeCount != 0 || state.overflowCount != 0
+                    || state.blocked || state.eligible) return false;
+                state.begin(2, first);
+                if (!state.release(first, 2, 0, 0)) return false;
+                if (state.release(first, 2, 0, 0)) return false;
+            }
+        }
+    return true;
+}();
+static_assert(phoneTransportTwoFingerReleaseOrderRegression);
