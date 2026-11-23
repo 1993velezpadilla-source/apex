@@ -1,0 +1,246 @@
+// Nonshipping human-singer listening reference for the near-zero-lookahead
+// harmonic prediction hypothesis. Reuse the existing, bounded WAV reader.
+// No private microphone takes, no host/UI modifications, no <=1ms claim.
+#define main offline_audition_main_not_called
+#include "tune_live_offline_audition.cpp"
+#undef main
+#include "../../Source/TuneLiveCore/Research/ApexTuneLiveHarmonicLivePrototype.h"
+#include <algorithm>
+#include <array>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <string>
+
+namespace {
+using APEX::TuneLive::Research::HarmonicLivePrototype;
+constexpr int blockSize=128;
+
+Wave renderLive(const Wave& input, bool early, bool residual,
+                bool fastEngagement=false, bool fastTransitions=false,
+                bool highRegister=false, bool midRegister=false,
+                bool ultraHigh=false, bool dryLeapReset=false,
+                bool fastHop=false, bool consensus=false,
+                bool halfPeriodResearch=false) {
+    Wave out=input;
+    HarmonicLivePrototype engine;
+    engine.prepare(input.rate,input.channels);
+    APEX::TuneLive::VoiceSettings settings;
+    settings.root=9;settings.scale=0;settings.correction=1.0f;
+    settings.referenceHz=440.0f;settings.humanize=0.0f;
+    settings.flexTune=0.0f;settings.noteHysteresis=0.10f;
+    engine.setVoiceSettings(settings);
+    engine.enableEarlyOnset(early);
+    engine.enableResidualPreservation(residual);
+    engine.enableFastEngagement(fastEngagement);
+    engine.enableHalfPeriodEngagementResearch(halfPeriodResearch);
+    engine.enableHighRegisterOnset(highRegister);
+    engine.enableMidRegisterOnset(midRegister);
+    engine.enableUltraHighRegisterOnset(ultraHigh);
+    if(fastHop)engine.enableUltraHighFastHopResearch(true);
+    engine.enableUltraLeapConsensusResearch(consensus);
+    engine.enableNoteLeapDryReset(dryLeapReset);
+    engine.enableExperimentalEarlyTransitions(fastTransitions);
+    std::array<float,blockSize> left{},right{};
+    for(std::size_t offset=0;offset<input.frames();offset+=blockSize) {
+        const int n=static_cast<int>(std::min<std::size_t>(
+                                  blockSize,input.frames()-offset));
+        for(int i=0;i<n;++i) {
+            const auto frame=offset+static_cast<std::size_t>(i);
+            left[static_cast<std::size_t>(i)]=input.data[frame*input.channels];
+            if(input.channels==2)
+                right[static_cast<std::size_t>(i)]=input.data[frame*2+1];
+        }
+        float* buffers[2]={left.data(),input.channels==2?right.data():nullptr};
+        engine.process(buffers,input.channels,n);
+        for(int i=0;i<n;++i) {
+            const auto frame=offset+static_cast<std::size_t>(i);
+            out.data[frame*input.channels]=left[static_cast<std::size_t>(i)];
+            if(input.channels==2)
+                out.data[frame*2+1]=right[static_cast<std::size_t>(i)];
+        }
+    }
+    std::cout<<"VOCADITO_CAUSAL_LIVE residual="<<residual<<" early="<<early
+             <<" fast_wet="<<fastEngagement
+             <<" fast_note_transitions="<<fastTransitions
+             <<" dry_leap_reset="<<dryLeapReset
+             <<" ultra_high="<<ultraHigh
+             <<" ultra_fast_hop="<<fastHop
+             <<" ultra_consensus="<<consensus
+             <<" half_period_experimental="<<halfPeriodResearch
+             <<" first_ultra_ms="<<(engine.firstUltraSample()>=0?
+                  1000.0*engine.firstUltraSample()/input.rate:-1.0)
+             <<" high_register="<<highRegister
+             <<" mid_register="<<midRegister
+             <<" first_mid_ms="<<(engine.firstMidSample()>=0?
+                 1000.0*engine.firstMidSample()/input.rate:-1.0)
+             <<" first_high_ms="<<(engine.firstHighSample()>=0?
+                 1000.0*engine.firstHighSample()/input.rate:-1.0)
+             <<" first_F0_ms="<<1000.0*engine.firstVoiceSample()/input.rate
+             <<" first_halfwet_ms="<<1000.0*engine.firstHalfWetSample()/input.rate
+             <<" final_source_hz="<<engine.sourceHz()<<"\n";
+    return out;
+}
+}
+int main(int argc,char** argv) {
+    try {
+        if(argc!=3 || std::string(argv[1])!="--prefix")
+            throw std::runtime_error("usage: --prefix vocadito_human|vocadito_low|vocadito_high");
+        const std::string prefix=argv[2];
+        const auto source=readWave(prefix+"_source.wav");
+        if(source.frames()<source.rate || source.channels<1 || source.channels>2)
+            throw std::runtime_error("Unsupported short/empty real singer WAV");
+        const Wave candidate=renderLive(source,true,false);
+        const Wave preserved=renderLive(source,true,true);
+        const Wave fast=renderLive(source,true,true,true,true);
+        // Combined guarded high/mid notes, STILL research-only.
+        const Wave high=renderLive(source,true,true,true,true,true,true);
+        const Wave ultra=renderLive(source,true,true,true,true,true,true,true);
+        // Separate OFF-by-default wet re-seeding hypothesis. Never
+        // overwrite the existing ultra or HQ40 reference WAVs.
+        const Wave smooth=renderLive(source,true,true,true,true,true,true,true,true);
+        // New isolated opt-in 4-hop on exactly the same singer audio.
+        const Wave fastHop=renderLive(source,true,true,true,true,true,true,true,false,true);
+        const Wave consensus=renderLive(source,true,true,true,true,true,true,true,false,true,true);
+        // Isolated candidate; DO NOT overwrite guarded reference or HQ40.
+        const Wave halfCycle=renderLive(source,true,true,true,true,true,true,true,false,true,true,true);
+        const auto levels=level(candidate);
+        const auto residualLevels=level(preserved);
+        const auto fastLevels=level(fast);
+        const auto highLevels=level(high);
+        const auto ultraLevels=level(ultra);
+        const auto smoothLevels=level(smooth);
+        const auto fastHopLevels=level(fastHop);
+        const auto consensusLevels=level(consensus);
+        const auto halfCycleLevels=level(halfCycle);
+        if(!std::isfinite(levels.peak) || !std::isfinite(levels.rms) ||
+           levels.rms<1.0e-7 ||
+           !std::isfinite(residualLevels.peak) ||
+           !std::isfinite(residualLevels.rms) || residualLevels.rms<1.0e-7 ||
+           !std::isfinite(fastLevels.peak) ||
+           !std::isfinite(fastLevels.rms) || fastLevels.rms<1.0e-7 ||
+           !std::isfinite(highLevels.peak) ||
+           !std::isfinite(highLevels.rms) || highLevels.rms<1.0e-7 ||
+           !std::isfinite(ultraLevels.peak) ||
+           !std::isfinite(ultraLevels.rms) || ultraLevels.rms<1.0e-7 ||
+           !std::isfinite(smoothLevels.peak) ||
+           !std::isfinite(smoothLevels.rms) || smoothLevels.rms<1.0e-7 ||
+           !std::isfinite(fastHopLevels.peak) ||
+           !std::isfinite(fastHopLevels.rms) || fastHopLevels.rms<1.0e-7 ||
+           !std::isfinite(consensusLevels.peak) ||
+           !std::isfinite(consensusLevels.rms) || consensusLevels.rms<1.0e-7 ||
+           !std::isfinite(halfCycleLevels.peak) ||
+           !std::isfinite(halfCycleLevels.rms) || halfCycleLevels.rms<1.0e-7)
+            throw std::runtime_error("Predictive LIVE generated invalid/silent human audio");
+        const std::string result=prefix+"_harmonic_live_research.wav";
+        writeWave24(result,candidate);
+        const std::string residualFile=prefix+"_harmonic_live_residual_research.wav";
+        writeWave24(residualFile,preserved);
+        const std::string fastFile=prefix+"_harmonic_live_fast_research.wav";
+        writeWave24(fastFile,fast);
+        const std::string highFile=prefix+"_harmonic_live_high_research.wav";
+        writeWave24(highFile,high);
+        const std::string ultraFile=prefix+"_harmonic_live_ultra_research.wav";
+        writeWave24(ultraFile,ultra);
+        const std::string smoothFile=prefix+"_harmonic_live_ultra_smooth_research.wav";
+        writeWave24(smoothFile,smooth);
+        const std::string fastHopFile=prefix+"_harmonic_live_ultra_4hop_research.wav";
+        writeWave24(fastHopFile,fastHop);
+        const std::string consensusFile=prefix+"_harmonic_live_ultra_consensus_research.wav";
+        writeWave24(consensusFile,consensus);
+        const std::string halfCycleFile=prefix+"_harmonic_live_halfcycle_research.wav";
+        writeWave24(halfCycleFile,halfCycle);
+        const Wave validated=readWave(result);
+        const Wave residualValidated=readWave(residualFile);
+        const Wave fastValidated=readWave(fastFile);
+        const Wave highValidated=readWave(highFile);
+        const Wave ultraValidated=readWave(ultraFile);
+        const Wave smoothValidated=readWave(smoothFile);
+        const Wave fastHopValidated=readWave(fastHopFile);
+        const Wave consensusValidated=readWave(consensusFile);
+        const Wave halfCycleValidated=readWave(halfCycleFile);
+        if(validated.frames()!=source.frames() ||
+           validated.rate!=source.rate || validated.channels!=source.channels ||
+           residualValidated.frames()!=source.frames() ||
+           residualValidated.rate!=source.rate ||
+           residualValidated.channels!=source.channels ||
+           fastValidated.frames()!=source.frames() ||
+           fastValidated.rate!=source.rate ||
+           fastValidated.channels!=source.channels ||
+           highValidated.frames()!=source.frames() ||
+           highValidated.rate!=source.rate ||
+           highValidated.channels!=source.channels ||
+           ultraValidated.frames()!=source.frames() ||
+           ultraValidated.rate!=source.rate ||
+           ultraValidated.channels!=source.channels ||
+           smoothValidated.frames()!=source.frames() ||
+           smoothValidated.rate!=source.rate ||
+           smoothValidated.channels!=source.channels ||
+           fastHopValidated.frames()!=source.frames() ||
+           fastHopValidated.rate!=source.rate ||
+           fastHopValidated.channels!=source.channels ||
+           consensusValidated.frames()!=source.frames() ||
+           consensusValidated.rate!=source.rate ||
+           consensusValidated.channels!=source.channels ||
+           halfCycleValidated.frames()!=source.frames() ||
+           halfCycleValidated.rate!=source.rate ||
+           halfCycleValidated.channels!=source.channels)
+            throw std::runtime_error("LIVE human PCM24 round-trip corrupted format");
+        const std::string report=prefix+"_HARMONIC_LIVE_RESEARCH.txt";
+        std::ofstream out(report);
+        if(!out)throw std::runtime_error("Cannot open research evidence report");
+        out<<std::setprecision(8)
+           <<"NON-SHIPPING CAUSAL HARMONIC VOCAL TEST — HQ40 UNCHANGED\n"
+           <<"Public singer provenance: VOCADITO_LICENSE_AND_EVIDENCE.txt or "
+             "VOCADITO_REGISTER_MATRIX_LICENSE.txt\n"
+           <<"Rate="<<source.rate<<" channels="<<source.channels
+           <<" frames="<<source.frames()<<"\n"
+           <<"Peak="<<levels.peak<<" RMS="<<levels.rms
+           <<" clipped_frames="<<levels.clips<<"\n"
+           <<"Residual replacement peak="<<residualLevels.peak
+           <<" RMS="<<residualLevels.rms
+           <<" clipped_frames="<<residualLevels.clips<<"\n"
+           <<"Opt-in 1-period fast-engagement peak="<<fastLevels.peak
+           <<" RMS="<<fastLevels.rms
+           <<" clipped_frames="<<fastLevels.clips<<"\n"
+           <<"High-register accelerated peak="<<highLevels.peak
+           <<" RMS="<<highLevels.rms
+           <<" clipped_frames="<<highLevels.clips<<"\n"
+           <<"Ultra 80-frame research peak="<<ultraLevels.peak
+           <<" RMS="<<ultraLevels.rms
+           <<" clipped_frames="<<ultraLevels.clips<<"\n"
+           <<"Ultra with OPTIONAL dry-reseed peak="<<smoothLevels.peak
+           <<" RMS="<<smoothLevels.rms
+           <<" clipped_frames="<<smoothLevels.clips<<"\n"
+           <<"HALF-period candidate research-only peak="<<halfCycleLevels.peak
+           <<" RMS="<<halfCycleLevels.rms
+           <<" clipped_frames="<<halfCycleLevels.clips<<"\\n"
+           <<"4-hop consensus peak="<<consensusLevels.peak
+           <<" RMS="<<consensusLevels.rms
+           <<" clipped_frames="<<consensusLevels.clips<<"\n"
+           <<"4-hop opt-in research peak="<<fastHopLevels.peak
+           <<" RMS="<<fastHopLevels.rms
+           <<" clipped_frames="<<fastHopLevels.clips<<"\\n"
+           <<"Dry input and output have same frame count, but this is NOT "
+             "proof of 0ms perceived voice correction, formants or note reaction.\n"
+           <<"Compare separately level-matched to approved HQ40 and dry; "
+             "singing with Apollo Solo and real APEX host remains mandatory.\n"
+           <<(levels.clips>0
+               ?"WARNING: candidate clips; do not use this take for blind sound-quality ranking.\n"
+               :"No PCM24 output clipping detected in this take.\n");
+        std::cout<<"REAL_HARMONIC_LIVE_RENDER "<<result
+                 <<" residual_file="<<residualFile
+                 <<" fast_wet_file="<<fastFile
+                 <<" high_register_file="<<highFile
+                 <<" ultra_high_file="<<ultraFile
+                 <<" ultra_smooth_file="<<smoothFile
+                 <<" ultra_4hop_file="<<fastHopFile
+                 <<" ultra_consensus_file="<<consensusFile
+                 <<" half_cycle_file="<<halfCycleFile
+                 <<" peak="<<levels.peak<<" clips="<<levels.clips<<"\n";
+        return 0;
+    } catch(const std::exception& e) {
+        std::cerr<<"HARMONIC_LIVE_HUMAN_ERROR: "<<e.what()<<"\n";
+        return 1;
+    }
+}

@@ -45,6 +45,7 @@ public:
         seedNativeBubblegumLimiterEntry();
         seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
+        seedNativeTuneLiveEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
 
         PluginScanAuditLogCore::appendStartupTrace(
@@ -283,6 +284,7 @@ private:
         seedNativeBubblegumLimiterEntry();
         seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
+        seedNativeTuneLiveEntry();
 
         coordinator_.startScan(
             [progressCb](const PluginScanHostCoordinatorCore::ScanProgress& p)
@@ -382,6 +384,15 @@ private:
         juce::PluginDescription description;
         prototype.fillInPluginDescription(description);
         cache_.cacheFromDescription(description);
+    }
+
+    // APEX Tune Live remains intrinsic, including after a clean rescan.
+    void seedNativeTuneLiveEntry()
+    {
+        cache_.cacheFromDescription (
+            DAW::ApexNativePluginFormat::createTuneLiveDescription());
+        cache_.cacheFromDescription (DAW::ApexNativePluginFormat::createTuneLiveDescription (
+            APEX::TuneLive::Processor::Engine::Tracking));
     }
 
     void savePersistentData()
