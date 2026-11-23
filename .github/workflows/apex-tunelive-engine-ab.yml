@@ -143,6 +143,26 @@ jobs:
             test "$(wc -l < "human-phase-ab/$voice"-metrics.jsonl)" -eq 2
           done
           cp VOCADITO_REGISTER_MATRIX_LICENSE.txt human-phase-ab/ATTRIBUTION.txt
+          python3 - <<'PY'
+          import json, pathlib
+          root=pathlib.Path('human-phase-ab')
+          for voice in ('low','high'):
+              rows=[json.loads(line) for line in
+                  (root/(voice+'-metrics.jsonl')).read_text().splitlines()]
+              assert len(rows)==2,(voice,rows)
+              before,after=rows
+              assert before['mode']=='original' and after['mode']=='phase_research'
+              assert before['nonfinite']==after['nonfinite']==0
+              assert after['max_added_step_over_dry'] <= before['max_added_step_over_dry'] * .70, (voice,rows)
+              assert after['max_step'] <= before['max_step']*1.02, (voice,rows)
+              assert after['likely_added_click_steps'] <= before['likely_added_click_steps']*1.15, (voice,rows)
+              assert after['nearest_tet_cents_median'] <= before['nearest_tet_cents_median']+3.0, (voice,rows)
+              print('REAL_SINGER_RESEARCH_GUARD_PASS',voice,
+                    'added_step',before['max_added_step_over_dry'],'->',after['max_added_step_over_dry'],
+                    'worst_step',before['max_step'],'->',after['max_step'],
+                    'candidate_click_events',before['likely_added_click_steps'],'->',
+                    after['likely_added_click_steps'])
+          PY
       - name: Upload only CC BY licensed audition outputs and measurements
         uses: actions/upload-artifact@v4
         with:

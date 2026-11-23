@@ -214,9 +214,16 @@ public:
                 const bool weakModel = bank_.size > 0 &&
                     bank_.correctionGain[channel] < 0.80;
                 const bool outgoingTransition = decayLeft_ > 0 && outgoing_.size > 0;
-                const double maxCorrectionStep =
-                    researchPhaseSlew_ && (weakModel || outgoingTransition)
-                        ? 0.034 : 0.18;
+                // Real-singer A/B exposed a 0.18 FS correction-only
+                // impulse at an *ordinary* voiced frame, outside mismatch
+                // and bank-crossfade events. Protect the entire research
+                // correction derivative; do not modify any dry sample.
+                // 0.060 is above the normal 0.03--0.04 harmonic derivative
+                // of our synthetic voiced fixture, while forcing detected
+                // one-sample artifacts to spread over adjacent samples.
+                // This remains OFF in the shipping engine.
+                const double maxCorrectionStep = !researchPhaseSlew_ ? 0.18
+                    : (weakModel || outgoingTransition) ? 0.034 : 0.060;
                 double correction = std::clamp(
                     delta[channel], lastCorrection_[channel] - maxCorrectionStep,
                     lastCorrection_[channel] + maxCorrectionStep);
