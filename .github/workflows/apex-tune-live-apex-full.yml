@@ -1,0 +1,102 @@
+name: Tune Live full APEX Windows Debug Release
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/apex-tune-live-apex-full.yml'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Source/TuneLiveUI/**'
+      - 'My DAW/DAW_Core/Source/PluginHostCore/ApexNativePluginFormat.h'
+      - 'My DAW/DAW_Core/Source/PluginScanCore/PluginScannerCore.h'
+      - 'My DAW/DAW_Core/DAW_Core.jucer'
+      - 'My DAW/DAW_Core/Tests/TuneLive/**'
+      - 'My DAW/DAW_Core/Scripts/run_tune_live_native_host_tests.ps1'
+      - 'My DAW/DAW_Core/Tests/Source/G10/G10FormatHostTests.cpp'
+      - 'My DAW/DAW_Core/Tests/Source/C4/C4FormatHostTests.cpp'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/ParametricEQFormatHostTests.cpp'
+  push:
+    branches: [feature/apex-tune-live-native-v1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tune-live-full-apex-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  apex-windows-full:
+    name: APEX ${{ matrix.configuration }} / native Tune Live
+    runs-on: windows-2025
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        shell: powershell
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Repository policy and evidence gates
+        run: |
+          .\Scripts\test_repository_policy.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\Scripts\test_validate_test_evidence.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Materialize exact repository-locked JUCE and MSVC dependencies
+        run: .\Scripts\prepare_ci.ps1
+      - name: Build actual APEX desktop app with Tune Live registered
+        run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
+      # Make a usable full desktop build available even if lengthy test
+      # fixtures or subsequent format-registry regressions fail.
+      - name: Publish full compiled desktop executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-TuneLive-${{ matrix.configuration }}-${{ github.sha }}
+          path: |
+            My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
+            My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.pdb
+          if-no-files-found: error
+      - name: Build and run focused APEX native host tests before heavy fixtures
+        run: .\Scripts\run_tune_live_native_host_tests.ps1 -Configuration ${{ matrix.configuration }}
+      # Main.cpp selects category OR name, never their intersection.
+      # Verify the whole APEX.Smoke category with real assertion JSON;
+      # the previous combined arguments silently ignored -Name.
+      # Capture the real production JUCE editor through the APEXTests
+      # executable, which has JUCE and native plugin linkage in this build.
+      # No illustrated mock-up: PNG is Component::createComponentSnapshot()
+      # of Processor::createEditor() at its real default 1200x750.
+      - name: Capture current APEX Tune Live native JUCE GUI screenshot
+        if: matrix.configuration == 'Release'
+        run: |
+          $testExe = Join-Path (Get-Location) "Tests\\Builds\\VisualStudio2026\\x64\\Release\\ConsoleApp\\APEXTests.exe"
+          if (-not (Test-Path -LiteralPath $testExe -PathType Leaf)) { throw "Missing compiled APEXTests" }
+          & $testExe '--capture-tune-live-gui=evidence/TuneLive/TuneLive_GUI_Approved_1200x750.png'
+          if ($LASTEXITCODE -ne 0) { throw "Real JUCE GUI capture failed" }
+          $pngPath = Join-Path (Get-Location) 'evidence\\TuneLive\\TuneLive_GUI_Approved_1200x750.png'
+          if (-not (Test-Path -LiteralPath $pngPath -PathType Leaf)) { throw "Missing actual GUI screenshot" }
+          if ((Get-Item -LiteralPath $pngPath).Length -lt 5000) { throw "Suspiciously small captured GUI" }
+          Write-Host "[PASS] Captured actual APEX Tune Live GUI: $pngPath"
+      - name: Publish current APEX Tune Live GUI screenshot
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-TuneLive-GUI-Actual-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/TuneLive/TuneLive_GUI_Approved_1200x750.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: APEX smoke suite with real assertions and external VST3 fixtures
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Seed 0xA9E12026
+      - name: Preserve APEX test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-TuneLive-evidence-${{ matrix.configuration }}-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn
