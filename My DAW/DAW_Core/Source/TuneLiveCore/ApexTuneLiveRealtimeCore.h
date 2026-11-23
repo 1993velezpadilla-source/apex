@@ -214,33 +214,35 @@ public:
                 const bool weakModel = bank_.size > 0 &&
                     bank_.correctionGain[channel] < 0.80;
                 const bool outgoingTransition = decayLeft_ > 0 && outgoing_.size > 0;
-                // Real-singer A/B exposed a 0.18 FS correction-only
-                // impulse at an *ordinary* voiced frame, outside mismatch
-                // and bank-crossfade events. Protect the entire research
-                // correction derivative; do not modify any dry sample.
-                // 0.060 is above the normal 0.03--0.04 harmonic derivative
-                // of our synthetic voiced fixture, while forcing detected
-                // one-sample artifacts to spread over adjacent samples.
-                // This remains OFF in the shipping engine.
-                const double maxCorrectionStep = !researchPhaseSlew_ ? 0.18
-                    : (weakModel || outgoingTransition) ? 0.034 : 0.060;
+                // Preserve natural high-frequency vocal harmonics: full
+                // time correction slew made *more* suspicious events on real
+                // singers. Keep the tight guard during a known model fade,
+                // and reserve the separate output-slope guard for rare gross
+                // correction-only discontinuities.
+                const double maxCorrectionStep =
+                    researchPhaseSlew_ && (weakModel || outgoingTransition)
+                        ? 0.034 : 0.18;
                 double correction = std::clamp(
                     delta[channel], lastCorrection_[channel] - maxCorrectionStep,
                     lastCorrection_[channel] + maxCorrectionStep);
-                if (researchPhaseSlew_ && (weakModel || outgoingTransition))
+                if (researchPhaseSlew_)
                 {
-                    // The previous correction-only guard still allowed
-                    // synthetic and dry derivatives to add constructively.
-                    // Bound the COMBINED output step, while never restricting
-                    // the slope of a genuine dry consonant on its own.
+                    // The original waveform's instantaneous derivative is
+                    // our protection for authentic sharp consonants and
+                    // loud high-register partials. A gross added-sample
+                    // discontinuity must be well above both the dry movement
+                    // and the normal corrected harmonic slope before we
+                    // adjust it. Otherwise pass the correction unchanged.
                     const double drySlope = input[channel] - lastDry_[channel];
-                    const double requestedOutputSlope =
-                        drySlope + correction - lastCorrection_[channel];
-                    const double allowedOutputSlope =
-                        std::max(0.035, std::abs(drySlope) + 0.004);
-                    correction += std::clamp(requestedOutputSlope,
-                        -allowedOutputSlope, allowedOutputSlope)
-                        - requestedOutputSlope;
+                    const double correctionSlope = correction - lastCorrection_[channel];
+                    const double requestedOutputSlope = drySlope + correctionSlope;
+                    const double naturalCap = std::max(0.040,
+                        std::abs(drySlope) + 0.010);
+                    const bool anomaly = std::abs(correctionSlope) > 0.065 &&
+                        std::abs(requestedOutputSlope) > naturalCap + 0.015;
+                    if (anomaly)
+                        correction += std::clamp(requestedOutputSlope,
+                            -naturalCap, naturalCap) - requestedOutputSlope;
                 }
                 data[c][i] = static_cast<float>(std::clamp(input[channel] + correction, -8.0, 8.0));
                 lastCorrection_[channel] = static_cast<double>(data[c][i]) - input[channel];
