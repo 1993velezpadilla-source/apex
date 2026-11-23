@@ -49,7 +49,7 @@ jobs:
           root=pathlib.Path('tune-engine-ab')
           results=[json.loads(line) for name in ('apex','flayr')
                    for line in (root/(name+'.jsonl')).read_text().splitlines()]
-          assert len(results)==4,results
+          assert len(results)==5,results
           assert all(r['frames']==192000 and r['nonfinite']==0 for r in results)
           (root/'comparison.json').write_text(json.dumps({
               'comparison':'Synthetic PCM fixture, not Android device xrun evidence',

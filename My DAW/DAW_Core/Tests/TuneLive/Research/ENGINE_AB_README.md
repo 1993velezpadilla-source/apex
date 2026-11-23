@@ -19,3 +19,12 @@ DSP API: MIT Antares-patent-inspired JSFX (REAPER JSFX/EEL2 runtime needed)
 https://github.com/superdandi/autotune-jsfx ; OpenTune (MIT, DSP coupled to
 JUCE processor and voice/reverb effects) https://github.com/bemtorres/opentune .
 Neither is proven to be original proprietary Antares source.
+
+## Phase-continuous research variant
+The APEX tracking research path optionally smooths the source oscillator frequency
+at a 16-sample cadence using a 4ms time constant and extends the old-bank
+release to 5ms. Its phase accumulator never resets during normal F0 updates.
+This is a non-shipping experimental flag in RealtimeCore, off by default.
+The A/B benchmark includes a fifth row, tracking_phase_slew_research.
+Audible results, actual pitch accuracy, and real Android xrun behavior must be
+validated before considering promotion. The code adds no new memory allocation.

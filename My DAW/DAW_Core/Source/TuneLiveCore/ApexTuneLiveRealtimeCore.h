@@ -36,6 +36,11 @@ public:
         // Preserve instantaneous transient attenuation; slow only the
         // correction recovery to prevent sharp upward gain modulation.
         correctionRestoreStep_ = 1.0 / (0.004 * rate_ + 1.0);
+        // Research variant only: glide harmonic oscillator F0 over 4ms
+        // instead of reprogramming its frequency at every pitch-tracker hop.
+        // Coefficients update every 16 samples; no memory or locks in callback.
+        phaseSlewStep_ = 1.0 - std::exp(-kControlHop / (rate_ * 0.004));
+        researchDecaySamples_ = std::max(2, static_cast<int>(std::ceil(0.005 * rate_)));
         decaySamples_ = std::max(2, static_cast<int>(std::ceil(0.0015 * rate_)));
         neutralHoldSamples_ = static_cast<int>(std::lround(0.045 * rate_));
         reset();
@@ -56,6 +61,8 @@ public:
         retune_ = -1.0f;
         controlLeft_ = decayLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
         missingPitchHops_ = postDropoutGuardHops_ = 0;
+        phaseLeft_ = 0;
+        phaseHz_ = 0.0;
         waveformReleaseCount_ = 0;
         frequency_ = 0.0f;
     }
@@ -66,6 +73,10 @@ public:
     double appliedShiftSemitones() const noexcept { return shift_; }
     // Read after processing (test/diagnostic only; no cross-thread contract).
     unsigned waveformReleaseCount() const noexcept { return waveformReleaseCount_; }
+
+    // Deliberately NOT a user-facing plug-in setting. Set only before process()
+    // in isolated research tests. The shipping mode remains bit-for-bit default.
+    void setResearchPhaseSlew(bool enabled) noexcept { researchPhaseSlew_ = enabled; }
 
     void process(float* const* data, int channels, int samples, const DspSettings& settings) noexcept
     {
@@ -128,6 +139,17 @@ public:
             {
                 advanceControl();
                 controlLeft_ = kControlHop;
+            }
+            // Continuous phase is more than keeping the phase phasor alive:
+            // the frequency driving that phasor must not jump on each
+            // detector update. Research mode glides only phase increments;
+            // musical target note and all wet safety gates remain unchanged.
+            if (researchPhaseSlew_ && bank_.size > 0 && --phaseLeft_ <= 0)
+            {
+                phaseLeft_ = kControlHop;
+                phaseHz_ += phaseSlewStep_ * (bank_.hz - phaseHz_);
+                bank_.sourceStep = Phase::rotate(kTau * phaseHz_ / rate_);
+                updateDestinationStep();
             }
 
             // An active note can cross the target pitch several times per
@@ -332,7 +354,11 @@ private:
             if (h >= priorSize)
                 bank_.gain[bin] = 1.0;
         }
-        bank_.sourceStep = Phase::rotate(kTau * bank_.hz / rate_);
+        if (!researchPhaseSlew_ || onset)
+        {
+            phaseHz_ = bank_.hz;
+            bank_.sourceStep = Phase::rotate(kTau * bank_.hz / rate_);
+        }
         bank_.learningStep = std::min(2.2 * bank_.hz / rate_, 0.68 / bank_.size);
         if (onset)
             initialiseWaveform();
@@ -388,7 +414,8 @@ private:
         if (bank_.size == 0)
             return;
         bank_.ratio = std::exp2(shift_ / 12.0);
-        bank_.destinationStep = Phase::rotate(kTau * bank_.hz * bank_.ratio / rate_);
+        const double renderHz = researchPhaseSlew_ && phaseHz_ > 0.0 ? phaseHz_ : bank_.hz;
+        bank_.destinationStep = Phase::rotate(kTau * renderHz * bank_.ratio / rate_);
         // Lock both oscillators together once the correction has fully faded.
         if (wet_ == 0.0 && std::abs(shift_) < 0.01)
             bank_.destination = bank_.source;
@@ -496,7 +523,10 @@ private:
         ++waveformReleaseCount_;
         outgoing_ = bank_;
         bank_ = {};
-        decayLeft_ = decaySamples_;
+        decaySpan_ = researchPhaseSlew_ ? researchDecaySamples_ : decaySamples_;
+        decayLeft_ = decaySpan_;
+        phaseHz_ = 0.0;
+        phaseLeft_ = 0;
         releaseAmount_ = wet_;
         wet_ = shift_ = 0.0;
         controlLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
@@ -521,13 +551,13 @@ private:
             source = source * outgoing_.source;
             destination = destination * outgoing_.destination;
         }
-        const double progress = static_cast<double>(decayLeft_) / decaySamples_;
+        const double progress = static_cast<double>(decayLeft_) / decaySpan_;
         const double window = progress * progress * (3.0 - 2.0 * progress);
         for (int c = 0; c < channels_; ++c)
         {
             const auto channel = static_cast<std::size_t>(c);
             delta[channel] *= releaseAmount_ * outgoing_.correctionGain[channel];
-            if (decayLeft_ == decaySamples_)
+            if (decayLeft_ == decaySpan_)
                 releaseOffset_[channel] = lastCorrection_[channel] - delta[channel];
             delta[channel] = window * (delta[channel] + window * releaseOffset_[channel]);
             if (mix == 0.0 && releaseAmount_ == 0.0)
@@ -546,17 +576,20 @@ private:
     Sample envelope_{}, lastCorrection_{}, releaseOffset_{};
     double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
     double correctionRestoreStep_ = 0.0;
+    double phaseSlewStep_ = 0.0, phaseHz_ = 0.0;
     double targetShift_ = 0.0, shift_ = 0.0, confidence_ = 0.0, wet_ = 0.0;
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
     double fastRetuneStart_ = 0.0, fastRetuneProgress_ = 0.0, fastWetStep_ = 0.0;
     float frequency_ = 0.0f, retune_ = -1.0f;
     unsigned position_ = 0, filled_ = 0;
     int channels_ = 1, decaySamples_ = 2, decayLeft_ = 0, controlLeft_ = 0;
+    int phaseLeft_ = 0, researchDecaySamples_ = 2, decaySpan_ = 2;
     int neutralHoldSamples_ = 0, neutralLeft_ = 0;
     int fastRetuneSamples_ = 0, fastRetuneLeft_ = 0;
     int unvoicedHoldHops_ = 2, missingPitchHops_ = 0, postDropoutGuardHops_ = 0;
     unsigned waveformReleaseCount_ = 0;
     bool prepared_ = false;
+    bool researchPhaseSlew_ = false;
 };
 
 } // namespace APEX::TuneLive

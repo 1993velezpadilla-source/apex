@@ -139,6 +139,15 @@ int main(int argc,char** argv){
                  [&](float* const* data,int n){e->process(data,1,n,p);},out);
     }
     {
+        auto e=std::make_unique<APEX::TuneLive::RealtimeCore>();
+        e->prepare(sr,1);
+        e->setResearchPhaseSlew(true);
+        APEX::TuneLive::DspSettings p;
+        p.correction=p.wet=1;p.retune=p.humanize=p.flexTune=0;
+        evaluate("apex","tracking_phase_slew_research",e->latencySamples(),dry,
+                 [&](float* const* data,int n){e->process(data,1,n,p);},out);
+    }
+    {
         auto e=std::make_unique<APEX::TuneLive::DspCore>();
         e->prepare(sr,block,1);
         APEX::TuneLive::DspSettings p;
