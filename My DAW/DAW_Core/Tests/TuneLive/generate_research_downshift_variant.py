@@ -26,8 +26,8 @@ def exactly_one(old, new):
     modified = modified.replace(old, new, 1)
 
 
-exactly_one('#include "ApexTuneLiveVoiceControl.h"',
-            '#include "../../Source/TuneLiveCore/ApexTuneLiveVoiceControl.h"')
+for header in ("ApexTuneLiveSettings.h", "ApexTuneLiveVoiceControl.h"):
+    exactly_one(f'#include "{header}"', f'#include "../../Source/TuneLiveCore/{header}"')
 exactly_one("namespace APEX { namespace TuneLive {",
             "namespace APEX { namespace TuneLiveResearch {\nusing namespace APEX::TuneLive;")
 exactly_one("class DspCore final {", "class ResearchCompensatedDspCore final {")

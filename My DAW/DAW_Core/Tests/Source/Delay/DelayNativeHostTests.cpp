@@ -29,7 +29,7 @@ public:
         DAW::ApexNativePluginFormat native;
         juce::OwnedArray<juce::PluginDescription> results;
         native.findAllTypesForFile(results,{});
-        expectEquals(results.size(),7,"G10, EQ, Opto, Precision C, Limiter, Delay and Reverie visible");
+        expectEquals(results.size(),9,"nine visible APEX Native processors");
         int limiterMatches=0;
         int precisionMatches=0;
         for(const auto* item:results)

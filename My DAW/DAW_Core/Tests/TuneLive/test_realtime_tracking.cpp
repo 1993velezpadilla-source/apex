@@ -166,13 +166,13 @@ bool testVibrato() {
     engine.reset();
     run(engine, expressive, preserve, 128);
 
-    auto measure = [](const std::vector<float>& audio) {
+    auto measure = [](const std::vector<float>& audio, int rate) {
         PitchTracker analyser;
         analyser.prepare(rate);
         double sum = 0.0, sumSquares = 0.0;
         int count = 0;
         for (std::size_t i = 0; i < audio.size(); ++i) {
-            if (analyser.push(audio[i]) && i >= rate && analyser.latest().voiced) {
+            if (analyser.push(audio[i]) && i >= static_cast<std::size_t>(rate) && analyser.latest().voiced) {
                 const double cents = 1200.0 * std::log2(analyser.latest().hz / 440.0);
                 sum += cents;
                 sumSquares += cents * cents;
@@ -182,7 +182,7 @@ bool testVibrato() {
         const double mean = sum / std::max(1, count);
         return std::array<double,2>{mean, std::sqrt(std::max(0.0, sumSquares / std::max(1, count) - mean * mean))};
     };
-    const auto input = measure(dry), fixed = measure(hard), natural = measure(expressive);
+    const auto input = measure(dry, rate), fixed = measure(hard, rate), natural = measure(expressive, rate);
     std::cout << "vibrato_dry_cents=" << input[1] << " hard_cents=" << fixed[1]
               << " preserved_cents=" << natural[1] << " preserved_center_cents=" << natural[0] << '\n';
     return input[1] > 10.0 && natural[1] > 0.55 * input[1] && natural[1] < 1.4 * input[1]
