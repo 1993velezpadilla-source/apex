@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/apex-tunelive-engine-ab.yml'
       - 'My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_engine_ab.cpp'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/ApexTuneLiveRealtimeCore.h'
 permissions:
   contents: read
 jobs:
