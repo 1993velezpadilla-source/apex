@@ -1,5 +1,4 @@
-// APEX Tune Live upper-register startup with shorter YIN history and cadence.
-// Both detector paths require two agreeing candidates.
+// APEX Tune Live upper-register analysis cadence and cold-onset octave checks.
 // Actual wet signal from the causal prototype, no input-frequency oracle.
 // Independently measure settled output cents, glitches and false octaves.
 // Faster F0 observation != 1ms acoustic correction / ASIO round-trip.
@@ -23,13 +22,14 @@ float harmonics(double sr, double hz, int i, bool strongSecond) {
          +0.012*std::sin(4.0*p+0.13));
 }
 
-bool falseHighLock(double sr, double hz, bool strongSecond, bool shorter) {
+bool falseHighLock(double sr, double hz, bool strongSecond, bool faster,
+                   bool shortColdWindow=false) {
     APEX::TuneLive::Research::UltraHighRegisterProbe detector;
     detector.prepare(sr);
-    if(shorter)detector.enableFastHopResearch(true);
+    if(faster)detector.enableFastHopResearch(true);
     bool falseLock=false;
     for(int i=0;i<static_cast<int>(0.09*sr);++i) {
-        if(detector.push(harmonics(sr,hz,i,strongSecond)) &&
+        if(detector.push(harmonics(sr,hz,i,strongSecond),shortColdWindow) &&
            detector.latest().voiced)falseLock=true;
     }
     return falseLock;
@@ -45,7 +45,7 @@ int main() {
             const auto fourHop=run(sr,target,true,true,false,true,true);
             const double savedF0=previous.voiceMs-fourHop.voiceMs;
             const double savedWet=previous.halfWetMs-fourHop.halfWetMs;
-            const bool earlier=savedF0>=0.6 && savedWet>=0.6 &&
+            const bool earlier=savedF0>0.15 && savedWet>0.15 &&
                 fourHop.voiceMs>=5.0 && fourHop.halfWetMs>fourHop.voiceMs;
             const bool audio=fourHop.finite && previous.finite &&
                 fourHop.wetMix>0.95 && fourHop.maxOutputStep<0.65 &&
@@ -84,7 +84,8 @@ int main() {
             for(bool strong:std::array<bool,2>{{false,true}}) {
                 const bool before=falseHighLock(sr,lower,strong,false);
                 const bool after=falseHighLock(sr,lower,strong,true);
-                const bool safe=!before && !after;
+                const bool cold=falseHighLock(sr,lower,strong,true,true);
+                const bool safe=!before && !after && !cold;
                 valid &=safe;
                 vetoed+=safe;
                 std::cout<<"ULTRA_4HOP_OCTAVE_GUARD sr="<<sr
@@ -92,6 +93,7 @@ int main() {
                          <<" strong_second="<<strong
                          <<" false_lock_before="<<before
                          <<" false_lock_after="<<after
+                         <<" false_lock_cold="<<cold
                          <<" protected="<<safe<<"\n";
             }
         }

@@ -69,6 +69,7 @@ public:
         activeHarmonics_=0;
         minimumVoicedSamples_=0;
         historyWritePosition_=historyFrames_=0;
+        detectorChannel_=0;
         releaseRemaining_=0;
         lastCorrection_.fill(0.0);
         voiced_=false;
@@ -104,8 +105,7 @@ public:
         ultraHighEnabled_=enabled;
     }
     // NONSHIPPING faster 4-hop YIN candidate, opt-in after prepare() and
-    // before processing. The shorter window still requires two agreeing
-    // frames and a measured octave veto.
+    // before processing. Short acoustic windows are limited to cold onsets.
     void enableUltraHighFastHopResearch(bool enabled) noexcept {
         ultra_.enableFastHopResearch(enabled);
     }
@@ -166,18 +166,21 @@ public:
         for(int i=0;i<length;++i) {
             std::array<float,2> dry{{safe(data[0][i]),
                  channels_==2?safe(data[1][i]):0.0f}};
-            if(halfPeriodEngagementResearch_) {
+            if(fastTransitionsEnabled_ || halfPeriodEngagementResearch_) {
                 inputHistory_[static_cast<std::size_t>(historyWritePosition_)]=dry;
                 historyWritePosition_=(historyWritePosition_+1)%kHistorySize;
                 historyFrames_=std::min(historyFrames_+1,kHistorySize);
             }
             envelopeL_+=(std::abs(dry[0])-envelopeL_)*envelopeStep_;
             envelopeR_+=(std::abs(dry[1])-envelopeR_)*envelopeStep_;
-            const float detector=(channels_==2 && envelopeR_>1.2f*envelopeL_)
-                                   ?dry[1]:dry[0];
+            detectorChannel_=channels_==2 && envelopeR_>1.2f*envelopeL_?1:0;
+            const float detector=dry[detectorChannel_];
             const bool preliminary=earlyEnabled_ && early_.push(detector);
             const bool earlyHigh=highRegisterEnabled_ && high_.push(detector);
-            const bool earlyUltra=ultraHighEnabled_ && ultra_.push(detector);
+            const bool shortColdWindow=halfPeriodEngagementResearch_ &&
+                                       !voiced_ && !hasRecentVoiceEstimate();
+            const bool earlyUltra=ultraHighEnabled_ &&
+                                  ultra_.push(detector,shortColdWindow);
             const bool earlyMid=midRegisterEnabled_ && mid_.push(detector);
             if(tracker_.push(detector)) {
                 const auto primary=tracker_.latest();
@@ -226,9 +229,10 @@ public:
                 // Still a hypothesis, never claim 1ms/ASIO certification.
                 const auto e=ultra_.latest();
                 const PitchTracker::Result estimate{e.hz,e.confidence,true};
-                updatePitch(estimate,true);
-                lastFastTransitionSample_=sampleCount_;
-                ++fastTransitionCount_;
+                if(updatePitch(estimate,true)) {
+                    lastFastTransitionSample_=sampleCount_;
+                    ++fastTransitionCount_;
+                }
             } else if(!voiced_ && earlyHigh && high_.latest().voiced &&
                       high_.latest().confidence>=0.95f) {
                 // 2 agreeing short-window analyses of actual samples, then
@@ -263,9 +267,10 @@ public:
                     // Short-window octave disagreement is intentionally
                     // restricted to large jumps; ordinary vibrato/neighbor
                     // semitone shifts remain under the full YIN authority.
-                    updatePitch(estimate,true);
-                    lastFastTransitionSample_=sampleCount_;
-                    ++fastTransitionCount_;
+                    if(updatePitch(estimate,true)) {
+                        lastFastTransitionSample_=sampleCount_;
+                        ++fastTransitionCount_;
+                    }
                 }
             }
             std::array<double,2> synth{{0.0,0.0}};
@@ -350,6 +355,55 @@ private:
     struct Partial {double cosine=0.0,sine=0.0;};
     using Harmonics = std::array<std::array<Partial,kHarmonics>,2>;
 
+    bool hasRecentVoiceEstimate() const noexcept {
+        return lastVoicedEstimateSample_>=0 &&
+            sampleCount_-lastVoicedEstimateSample_<static_cast<int64_t>(rate_*0.100);
+    }
+
+    float observedSample(double age,std::size_t channel) const noexcept {
+        const int whole=static_cast<int>(age);
+        const double fraction=age-whole;
+        const int recent=(historyWritePosition_+kHistorySize-1-whole)%kHistorySize;
+        const int older=(recent+kHistorySize-1)%kHistorySize;
+        const float current=inputHistory_[static_cast<std::size_t>(recent)][channel];
+        const float previous=inputHistory_[static_cast<std::size_t>(older)][channel];
+        return static_cast<float>(current+fraction*(previous-current));
+    }
+
+    bool hasLowerOctaveEvidence(double candidateHz) const noexcept {
+        const double period=rate_/candidateHz;
+        if(historyFrames_<static_cast<int>(std::ceil(3.0*period))+1)return false;
+        // Subtract samples one candidate period apart to cancel its even
+        // harmonics. Coherent odd harmonics then indicate periodic energy at
+        // the lower octave, including when the singer's second harmonic is
+        // stronger than the fundamental.
+        constexpr int points=32;
+        constexpr double angle=6.28318530717958647692/points;
+        const Unit step{std::cos(angle),std::sin(angle)};
+        Unit phase{};
+        std::array<Partial,3> odd{};
+        double power=0.0;
+        for(int i=0;i<points;++i) {
+            const double age=i*2.0*period/points;
+            const double a=observedSample(age,detectorChannel_);
+            const double b=observedSample(age+period,detectorChannel_);
+            const double delta=0.5*(a-b);
+            power+=0.5*(a*a+b*b);
+            Unit harmonic=phase;
+            const Unit evenStep=multiply(phase,phase);
+            for(auto& partial:odd) {
+                partial.cosine+=delta*harmonic.real;
+                partial.sine+=delta*harmonic.imag;
+                harmonic=multiply(harmonic,evenStep);
+            }
+            phase=multiply(phase,step);
+        }
+        double oddPower=0.0;
+        for(const auto& p:odd)oddPower+=p.cosine*p.cosine+p.sine*p.sine;
+        constexpr double minimumOddEnergyRatio=0.0015;
+        return power>1.0e-8 && 2.0*oddPower>minimumOddEnergyRatio*points*power;
+    }
+
     void seedHarmonicsFromObservedPeriod() noexcept {
         // The detector has already listened to several periods. Project the
         // most recent one onto the harmonic model before the wet ramp starts.
@@ -363,17 +417,10 @@ private:
         Unit pastPhase=phaseSource_;
         for(int point=0;point<points;++point) {
             const double age=point*sourcePeriod/points;
-            const int whole=static_cast<int>(age);
-            const double fraction=age-whole;
-            const int recent=(historyWritePosition_+kHistorySize-1-whole)%kHistorySize;
-            const int older=(recent+kHistorySize-1)%kHistorySize;
-            const auto& recentFrame=inputHistory_[static_cast<std::size_t>(recent)];
-            const auto& olderFrame=inputHistory_[static_cast<std::size_t>(older)];
             std::array<double,2> weights{};
             for(int c=0;c<channels_;++c) {
                 const auto channel=static_cast<std::size_t>(c);
-                weights[channel]=(2.0/points)*
-                    (recentFrame[channel]+fraction*(olderFrame[channel]-recentFrame[channel]));
+                weights[channel]=(2.0/points)*observedSample(age,channel);
             }
             Unit harmonic=pastPhase;
             for(int h=0;h<activeHarmonics_;++h) {
@@ -434,7 +481,16 @@ private:
         return delta;
     }
 
-    void updatePitch(PitchTracker::Result estimate,bool earlySeed) noexcept {
+    bool updatePitch(PitchTracker::Result estimate,bool earlySeed) noexcept {
+        const bool recentVoice=hasRecentVoiceEstimate();
+        if(fastTransitionsEnabled_ && recentVoice && estimate.voiced &&
+           estimate.hz>=400.0f && estimate.hz>1.85*sourceHz_ &&
+           estimate.hz<2.15*sourceHz_ && hasLowerOctaveEvidence(estimate.hz)) {
+            if(earlySeed)return false;
+            // The full tracker found the period of the stronger harmonic.
+            // Refresh the current note from its verified lower octave.
+            estimate.hz*=0.5f;
+        }
         const auto decision=policy_.update(estimate,settings_);
         const bool acceptable=decision.voiced &&
                  std::isfinite(estimate.hz) &&
@@ -453,8 +509,6 @@ private:
             // leap. Preserve the last trustworthy source pitch for 100 ms
             // rather than requiring two consecutive voiced frames. A genuine
             // long silence never triggers this cross-note comparison.
-            const bool recentVoice=lastVoicedEstimateSample_>=0 &&
-                (sampleCount_-lastVoicedEstimateSample_)<static_cast<int64_t>(rate_*0.100);
             if(sourceHz_>=55.0 && recentVoice &&
                 std::abs(1200.0*std::log2(estimate.hz/sourceHz_))>600.0) {
                 releaseResidualCorrection();
@@ -513,6 +567,7 @@ private:
             targetWet_=0.0;
             voicedSamples_=0;
         }
+        return acceptable;
     }
     static Unit multiply(Unit a,Unit b) noexcept {
         return {a.real*b.real-a.imag*b.imag,
@@ -535,9 +590,10 @@ private:
     MidRegisterOnsetProbe mid_;
     VoiceControl policy_;
     VoiceSettings settings_{};
-    // A period at 400Hz uses at most 480 frames at the maximum rate.
-    static constexpr int kHistorySize=512;
+    // Three periods at 400Hz use at most 1440 frames at the maximum rate.
+    static constexpr int kHistorySize=2048;
     std::array<std::array<float,2>,kHistorySize> inputHistory_{};
+    std::size_t detectorChannel_=0;
     Harmonics partials_{},releasePartials_{};
     std::array<double,2> lastCorrection_{},releaseOffset_{};
     Unit phaseSource_{},phaseOutput_{},stepSource_{},stepOutput_{};

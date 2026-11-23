@@ -62,11 +62,13 @@ int main() {
             for(std::size_t i=0;i<old.audio.size();++i)
                 maxDelta=std::max(maxDelta,std::abs(
                     static_cast<double>(old.audio[i]-candidate.audio[i])));
-            const bool soundSafe=std::abs(cents)<18.0 &&
-                maxOutputStep(candidate)<0.65 && oldFirst>=0.0 &&
-                newFirst>=0.0 && candidate.firstPitchSample==old.firstPitchSample;
             const bool upper=target>=400.0;
-            const bool onTime=!upper || !guarded || newWet<=7.8;
+            const auto pitchSaved=old.firstPitchSample-candidate.firstPitchSample;
+            const bool onTime=upper && guarded
+                ? pitchSaved>=static_cast<int64_t>(0.0005*rate) && newWet<=7.8
+                : pitchSaved==0;
+            const bool soundSafe=std::abs(cents)<18.0 &&
+                maxOutputStep(candidate)<0.65 && oldFirst>=0.0 && newFirst>=0.0;
             const bool improved=upper && oldWet-newWet>=0.4 &&
                 newFirst<=oldFirst && maxDelta>0.0001;
             const bool untouched=!upper && maxDelta==0.0 &&
@@ -77,6 +79,7 @@ int main() {
             else{++lowCount;lowUnchanged+=ok;}
             std::cout<<"HALF_CYCLE_WET_AB rate="<<rate
                      <<" target="<<target<<" guarded="<<guarded
+                     <<" first_pitch_saved_ms="<<1000.0*pitchSaved/rate
                      <<" old_wet50_ms="<<oldWet
                      <<" half_cycle_wet50_ms="<<newWet
                      <<" wet50_saved_ms="<<oldWet-newWet

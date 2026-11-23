@@ -50,6 +50,7 @@ int main() {
             t.engine.setVoiceSettings(voice);
             t.engine.enableEarlyOnset(true);
             t.engine.enableHighRegisterOnset(true);
+            t.engine.enableMidRegisterOnset(true);
             // Four simultaneous opt-in guarded tracks exercise the faster
             // high-register path alongside four unchanged baseline tracks.
             // The DSP callback remains allocation-watched for all eight.
@@ -57,6 +58,7 @@ int main() {
                 t.engine.enableUltraHighRegisterOnset(true);
                 t.engine.enableUltraHighFastHopResearch(true);
                 t.engine.enableUltraLeapConsensusResearch(true);
+                t.engine.enableHalfPeriodEngagementResearch(true);
             }
             t.engine.enableExperimentalEarlyTransitions(true);
             t.engine.enableResidualPreservation(true);

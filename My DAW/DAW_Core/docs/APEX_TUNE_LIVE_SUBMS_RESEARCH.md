@@ -191,14 +191,19 @@ processor and its original ~40ms PDC remain untouched.
 
 ## Desktop candidate verification
 
-The guarded upper-register detector now uses 72 samples at its decimated
-rate, with two agreeing estimates and a required octave check. At a cold
-high-note onset, the shifter initializes its partials from an already
+For cold high-note onsets, the guarded upper-register detector uses 72
+samples at its decimated rate, with two agreeing estimates and a required
+octave check. Active vocal transitions retain the 80-sample window.
+At a cold high-note onset, the shifter initializes its partials from an already
 observed period, so it can begin its wet ramp immediately. During voicing
 loss or a note leap, a one-millisecond crossfade releases the previous
 harmonic model while the input continues at its original sample position.
 The per-sample shifter uses cached harmonic and engagement limits, and
 the short YIN analysis uses vectorizable double-precision reductions.
+Suspected upward octaves in active vocals also check the recent input for
+coherent odd harmonics. This keeps a strong second harmonic from replacing
+the fundamental during a note and retains fast acquisition for genuine
+octave leaps.
 
 At 48 kHz in the guarded A4 +30-cent mono regression:
 
@@ -216,7 +221,7 @@ measures the correction discontinuity after subtracting the input step.
 At 48 kHz the discontinuity fell from 0.3504 to below 0.000001 on that
 fixture.
 
-The same three Vocadito recordings pass the objective pitch and short
-waveform regressions. The higher-register recording still has four
-octave discrepancies in the sustained-output diagnostic. Blind vocal
-quality checks and physical Apollo Solo round-trip testing remain open.
+In Vocadito's higher-register recording, a passage near 400 Hz previously
+triggered an incorrect estimate near 800 Hz. The detector regression now
+checks both the false-octave case and a genuine octave transition. Blind
+vocal quality checks and physical Apollo Solo round-trip testing remain open.

@@ -7,6 +7,52 @@
 #define main original_causal_leap_main_not_called
 #include "test_causal_live_note_leaps.cpp"
 #undef main
+
+namespace {
+bool holdsNoteUnderSecondHarmonic(double rate) {
+    using APEX::TuneLive::Research::HarmonicLivePrototype;
+    HarmonicLivePrototype engine;
+    engine.prepare(rate);
+    engine.setVoiceSettings(hardSettings());
+    engine.enableEarlyOnset(true);
+    engine.enableHighRegisterOnset(true);
+    engine.enableMidRegisterOnset(true);
+    engine.enableUltraHighRegisterOnset(true);
+    engine.enableUltraHighFastHopResearch(true);
+    engine.enableUltraLeapConsensusResearch(true);
+    engine.enableHalfPeriodEngagementResearch(true);
+    engine.enableExperimentalEarlyTransitions(true);
+    engine.enableFastEngagement(true);
+    engine.enableResidualPreservation(true);
+
+    // Start with an identifiable G4, then weaken the fundamental while
+    // the stronger even harmonics and F0 continue through several beats.
+    double phase=0.0;
+    int voiced=0, octave=0;
+    for(int i=0;i<static_cast<int>(0.75*rate);++i) {
+        const double time=i/rate;
+        const double frequency=398.8+1.8*std::sin(2.0*pi*4.3*time);
+        phase+=2.0*pi*frequency/rate;
+        const double odd=0.024+0.13*std::clamp((0.22-time)/0.08,0.0,1.0);
+        const double even=0.32+0.05*std::sin(2.0*pi*3.1*time);
+        float sample=static_cast<float>(odd*std::sin(phase)+
+            even*std::sin(2.0*phase+0.21)+0.4*odd*std::sin(3.0*phase+0.13)+
+            0.20*std::sin(4.0*phase+0.50));
+        float* channel[]={&sample};
+        engine.process(channel,1,1);
+        if(time>0.2 && engine.voiced()) {
+            ++voiced;
+            octave+=engine.sourceHz()>650.0;
+        }
+    }
+    std::cout<<"ULTRA_STRONG_SECOND_HARMONIC rate="<<rate
+             <<" voiced_samples="<<voiced<<" false_octave_samples="<<octave
+             <<" final_source_hz="<<engine.sourceHz()<<"\n";
+    return voiced>0.50*rate && octave==0 && engine.sourceHz()<410.0 &&
+           engine.sourceHz()>390.0;
+}
+}
+
 int main() {
     bool green=true;
     int passed=0;
@@ -46,7 +92,9 @@ int main() {
             const double dryStep=dry[at]-dry[at-1];
             correctionStep=std::abs(wetStep-dryStep);
         }
-        const bool pass=realLeap && finalOutput && correctionStep<0.001;
+        const bool stayedInOctave=holdsNoteUnderSecondHarmonic(sr);
+        const bool pass=realLeap && finalOutput && correctionStep<0.001 &&
+                        stayedInOctave;
         passed+=pass;green &=pass;
         std::cout<<"ULTRA_CONSENSUS_GENUINE_LEAP sr="<<sr
                  <<" baseline_ms="<<baselineMs

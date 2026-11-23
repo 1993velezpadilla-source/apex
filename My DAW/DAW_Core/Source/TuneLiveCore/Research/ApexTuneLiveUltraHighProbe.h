@@ -18,6 +18,7 @@ public:
     static constexpr int kFastWindow=72;
     static constexpr int kMaxLag=32;
     static constexpr int kHop=8;
+    static constexpr int kFastHop=4;
     struct Result {float hz=0.0f,confidence=0.0f;bool voiced=false;};
     void prepare(double rate) noexcept {
         rate_=(std::isfinite(rate)&&rate>8000.0&&rate<=192000.0)?rate:48000.0;
@@ -37,7 +38,7 @@ public:
     }
     // Returns true when a new analysis was produced. The latest result can
     // be unvoiced. Call once per ORIGINAL audio input sample.
-    bool push(float input) noexcept {
+    bool push(float input,bool allowShortColdWindow=false) noexcept {
         ++samples_;
         if(!std::isfinite(input))input=0.0f;
         low1_=pole_*low1_+(1.0-pole_)*input;
@@ -49,8 +50,9 @@ public:
         if(filled_<kWindow)++filled_;
         if(++hop_<hopSize_)return false;
         hop_=0;
-        if(filled_<analysisWindow_)return false;
-        const Result candidate=measure();
+        const int window=allowShortColdWindow && hopSize_==kFastHop?kFastWindow:kWindow;
+        if(filled_<window)return false;
+        const Result candidate=measure(window);
         if(candidate.voiced && priorCandidate_>0.0f &&
            std::abs(1200.0f*std::log2(candidate.hz/priorCandidate_))<35.0f) {
             stableCount_=std::min(2,stableCount_+1);
@@ -62,12 +64,10 @@ public:
         if(result_.voiced && firstSample_<0)firstSample_=samples_;
         return true;
     }
-    // The shorter window still requires two consistent frames and enough
-    // history to compare the proposed period against its possible octave.
-    // Configure before processing.
+    // Configure the analysis cadence before processing. The shorter window
+    // is separately limited to cold onsets.
     void enableFastHopResearch(bool enabled) noexcept {
-        hopSize_=enabled?4:kHop;
-        analysisWindow_=enabled?kFastWindow:kWindow;
+        hopSize_=enabled?kFastHop:kHop;
         hop_=0;
         stableCount_=0;
         priorCandidate_=0.0f;
@@ -75,19 +75,19 @@ public:
     }
     Result latest() const noexcept {return result_;}
     int64_t firstVoicedSample() const noexcept {return firstSample_;}
-    double minimumWindowMs() const noexcept {return 1000.0*analysisWindow_/detectorRate_;}
+    double minimumWindowMs() const noexcept {return 1000.0*kWindow/detectorRate_;}
     int octaveVetoCount() const noexcept {return octaveVetoCount_;}
 private:
-    Result measure() noexcept {
-        const int start=(ringPosition_+kWindow-analysisWindow_)%kWindow;
+    Result measure(int window) noexcept {
+        const int start=(ringPosition_+kWindow-window)%kWindow;
         double energy=0.0;
-        for(int i=0;i<analysisWindow_;++i) {
+        for(int i=0;i<window;++i) {
             const float f=ring_[static_cast<std::size_t>((start+i)%kWindow)];
             frame_[static_cast<std::size_t>(i)]=f;
             energy+=static_cast<double>(f)*f;
         }
-        if(energy<analysisWindow_*0.00002)return {};
-        const int sumLen=analysisWindow_-maxLag_;
+        if(energy<window*0.00002)return {};
+        const int sumLen=window-maxLag_;
         double sum=0.0;
         int best=-1;
         float bestCmndf=1.0f;
@@ -122,7 +122,7 @@ private:
                 period+=std::clamp(0.5*(a-c)/denom,-0.5,0.5);
         }
         const float hz=static_cast<float>(detectorRate_/period);
-        const bool shortWindow=analysisWindow_==kFastWindow;
+        const bool shortWindow=window==kFastWindow;
         if(!std::isfinite(hz)||hz<(shortWindow?430.0f:420.0f)||hz>1000.0f)return {};
         // Guard against notes 220–400Hz masquerading as upper harmonics.
         // A real 220-Hz F0 with a strong 440-Hz harmonic can fool
@@ -134,7 +134,7 @@ private:
         // Fractional interpolation avoids rejecting genuine 220-Hz sources
         // merely because the detector's true period ends in half a sample.
         const double twice=2.0*period;
-        const int count=analysisWindow_-static_cast<int>(std::ceil(twice))-2;
+        const int count=window-static_cast<int>(std::ceil(twice))-2;
         const int minimumSupport=shortWindow
             ? static_cast<int>(std::ceil(period/2.0))
             : 20;
@@ -167,7 +167,7 @@ private:
            low1_=0.0,low2_=0.0;
     int decimation_=4,minLag_=12,maxLag_=72;
     int ringPosition_=0,filled_=0,substep_=0,hop_=0,stableCount_=0;
-    int hopSize_=kHop,analysisWindow_=kWindow;
+    int hopSize_=kHop;
     int octaveVetoCount_=0;
     int64_t samples_=0,firstSample_=-1;
     float priorCandidate_=0.0f;
