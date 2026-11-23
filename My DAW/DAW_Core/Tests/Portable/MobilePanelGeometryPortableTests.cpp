@@ -3695,3 +3695,26 @@ constexpr bool pluginBrowserScrollbarThicknessClamps = []() constexpr {
     return true;
 }();
 static_assert(pluginBrowserScrollbarThicknessClamps);
+
+
+// A diagonal FX-list swipe is a tap only inside the circular 8-unit
+// threshold. Malformed Android touch deltas must never overflow the squared
+// distance calculation or load a plugin on release.
+constexpr bool pluginBrowserDiagonalTapBoundaryIsSafe = []() constexpr {
+    using DAW::mobile::pluginBrowserRowTapActivates;
+    constexpr int huge = std::numeric_limits<int>::max();
+    constexpr int tiny = std::numeric_limits<int>::min();
+    for (int dx : { tiny, -huge, -9, -8, -7, -6, -1, 0, 1, 6, 7, 8, 9, huge })
+        for (int dy : { tiny, -huge, -9, -8, -7, -6, -1, 0, 1, 6, 7, 8, 9, huge })
+        {
+            const bool within = dx >= -8 && dx <= 8
+                && dy >= -8 && dy <= 8
+                && dx * dx + dy * dy <= 64;
+            if (pluginBrowserRowTapActivates(true, dx, dy, true) != within
+                || pluginBrowserRowTapActivates(true, dx, dy, false)
+                || !pluginBrowserRowTapActivates(false, dx, dy, false))
+                return false;
+        }
+    return true;
+}();
+static_assert(pluginBrowserDiagonalTapBoundaryIsSafe);
