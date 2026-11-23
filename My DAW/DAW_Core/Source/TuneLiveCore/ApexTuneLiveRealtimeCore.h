@@ -168,9 +168,32 @@ public:
             if (mix == 0.0 && wet_ == 0.0)
                 decayLeft_ = 0;
 
+            // The old and freshly detected note must be *complementary*
+            // during a bank handoff. Previously both corrections were at
+            // near-full level for the first millisecond, making a transient
+            // at pitch leaps despite a smoothed phase increment. Keep the
+            // shipping path untouched until a real-singer audit passes.
+            double incomingWeight = 1.0;
+            if (researchPhaseSlew_ && decayLeft_ > 0 && bank_.size > 0)
+            {
+                const double t = static_cast<double>(decayLeft_) / decaySpan_;
+                const double oldWeight = t * t * (3.0 - 2.0 * t);
+                incomingWeight = 1.0 - oldWeight;
+            }
             Sample delta = renderOutgoing(mix);
             if (bank_.size > 0)
-                renderAndLearn(input, delta);
+            {
+                if (researchPhaseSlew_ && incomingWeight < 1.0)
+                {
+                    Sample incoming{};
+                    renderAndLearn(input, incoming);
+                    for (int c = 0; c < channels_; ++c)
+                        delta[static_cast<std::size_t>(c)] +=
+                            incomingWeight * incoming[static_cast<std::size_t>(c)];
+                }
+                else
+                    renderAndLearn(input, delta);
+            }
             for (int c = 0; c < channels_; ++c)
             {
                 const auto channel = static_cast<std::size_t>(c);
