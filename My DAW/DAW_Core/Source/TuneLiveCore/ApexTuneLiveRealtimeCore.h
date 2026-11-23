@@ -152,7 +152,17 @@ public:
             for (int c = 0; c < channels_; ++c)
             {
                 const auto channel = static_cast<std::size_t>(c);
-                data[c][i] = static_cast<float>(std::clamp(input[channel] + delta[channel], -8.0, 8.0));
+                // True dry transients are never touched. Only the synthesized
+                // pitch correction is derivative-limited when a phase-model
+                // reacquisition produces a one-sample step (audible click).
+                // 0.18 FS/sample exceeds the normal note-transition peak
+                // measured by the existing tracking gauntlet (~0.162), but
+                // eliminates the 0.28-FS dropout pop without buffering/PDC.
+                constexpr double maxCorrectionStep = 0.18;
+                const double correction = std::clamp(
+                    delta[channel], lastCorrection_[channel] - maxCorrectionStep,
+                    lastCorrection_[channel] + maxCorrectionStep);
+                data[c][i] = static_cast<float>(std::clamp(input[channel] + correction, -8.0, 8.0));
                 lastCorrection_[channel] = static_cast<double>(data[c][i]) - input[channel];
             }
         }
