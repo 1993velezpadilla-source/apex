@@ -35,7 +35,7 @@ jobs:
           submodules: recursive
 
       - name: Install Projucer and Android build dependencies
-        timeout-minutes: 6
+        timeout-minutes: 18
         shell: bash
         run: |
           apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=25 -o Acquire::https::Timeout=25)
@@ -235,7 +235,7 @@ jobs:
       - name: Upload release-optimized ORIGINAL APEX ARM64 preview APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.ref_name == 'feature/mobile-portrait-frame-cache' && 'APEX-Frame-Cache-ARM64' || (github.ref_name == 'feature/mobile-portrait-zoom-rewrite' && 'APEX-Zoom-Rewrite-ARM64' || 'APEX-Android-Original-Release-Optimized-ARM64-PREVIEW') }}
+          name: ${{ github.ref_name == 'feature/mobile-portrait-tunelive-20261123' && 'APEX-Mobile-TuneLive-ARM64' || (github.ref_name == 'feature/mobile-portrait-frame-cache' && 'APEX-Frame-Cache-ARM64' || (github.ref_name == 'feature/mobile-portrait-zoom-rewrite' && 'APEX-Zoom-Rewrite-ARM64' || 'APEX-Android-Original-Release-Optimized-ARM64-PREVIEW')) }}
           path: android-release-real-apk/*.apk
           if-no-files-found: error
           retention-days: 14
