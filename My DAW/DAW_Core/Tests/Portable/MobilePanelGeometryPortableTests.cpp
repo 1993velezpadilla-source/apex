@@ -3812,3 +3812,38 @@ constexpr bool phoneTransportTwoFingerReleaseOrderRegression = []() constexpr {
     return true;
 }();
 static_assert(phoneTransportTwoFingerReleaseOrderRegression);
+
+
+// A zoom can change pixels-per-second or lane height while the rounded
+// Arrangement content dimensions stay constant. Old fractional wheel carry
+// must be cleared at that scale transition, but retained for unchanged scale.
+constexpr bool phoneWheelCarryResetsOnScaleWithoutResize = []() constexpr {
+    using DAW::mobile::TimelinePhoneWheelCarryState;
+    TimelinePhoneWheelCarryState carry{};
+    carry.observeContentSize(320, 480);
+    carry.observeContentScale(12.0, 44.0);
+    carry.x = 0.75;
+    carry.y = -0.25;
+    carry.observeContentSize(320, 480);
+    carry.observeContentScale(12.0, 44.0);
+    if (carry.x != 0.75 || carry.y != -0.25)
+        return false;
+    carry.observeContentScale(12.5, 44.0);
+    if (carry.x != 0.0 || carry.y != 0.0)
+        return false;
+    carry.x = 0.5;
+    carry.y = -0.5;
+    carry.observeContentScale(12.5, 48.0);
+    if (carry.x != 0.0 || carry.y != 0.0)
+        return false;
+    carry.x = 0.5;
+    carry.observeContentSize(321, 480);
+    if (carry.x != 0.0 || carry.contentWidth != 321)
+        return false;
+    carry.x = 0.5;
+    carry.reset();
+    return carry.x == 0.0 && carry.y == 0.0
+        && carry.contentWidth == -1 && carry.contentHeight == -1
+        && carry.pixelsPerSecond == -1.0 && carry.laneHeight == -1.0;
+}();
+static_assert(phoneWheelCarryResetsOnScaleWithoutResize);
