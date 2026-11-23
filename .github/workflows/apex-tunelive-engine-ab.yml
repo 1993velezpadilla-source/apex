@@ -7,6 +7,7 @@ on:
       - '.github/workflows/apex-tunelive-engine-ab.yml'
       - 'My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_engine_ab.cpp'
       - 'My DAW/DAW_Core/Source/TuneLiveCore/ApexTuneLiveRealtimeCore.h'
+      - 'My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_phase_human_ab.cpp'
 permissions:
   contents: read
 jobs:
@@ -96,5 +97,56 @@ jobs:
         with:
           name: APEX-TuneLive-Engine-AB-WAV-and-Metrics
           path: tune-engine-ab
+          if-no-files-found: error
+          retention-days: 14
+  real-singers:
+    name: Phase research on two licensed human voices
+    needs: ab-reference
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Cache pinned Vocadito dataset, CC BY 4.0
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: vocadito.zip
+          key: vocadito-zenodo-5578807-dea40fd18f14d899643c4ba221b33a46-v1
+      - name: Download independent licensed singers
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
+            --connect-timeout 40 --max-time 480 \
+            'https://zenodo.org/records/5578807/files/vocadito.zip?download=1' \
+            -o vocadito.zip
+      - name: Verify archive and select two annotated voice registers
+        run: |
+          set -euo pipefail
+          echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip' | md5sum --check -
+          python3 'My DAW/DAW_Core/Tests/TuneLive/select_vocadito_voice_registers.py'
+      - name: Compile original vs experimental Tracking human WAV audition
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem 'My DAW/DAW_Core/Source/ThirdParty' \
+            -isystem 'My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch' \
+            'My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_phase_human_ab.cpp' \
+            -o /tmp/apex_phase_human
+      - name: Render voice and pitch/peak/callback report for both singers
+        run: |
+          set -euo pipefail
+          mkdir -p human-phase-ab
+          for voice in low high; do
+            /tmp/apex_phase_human --input "vocadito_$voice"_source.wav \
+              --prefix "human-phase-ab/$voice" | tee "human-phase-ab/$voice"-metrics.jsonl
+            test "$(wc -l < "human-phase-ab/$voice"-metrics.jsonl)" -eq 2
+          done
+          cp VOCADITO_REGISTER_MATRIX_LICENSE.txt human-phase-ab/ATTRIBUTION.txt
+      - name: Upload only CC BY licensed audition outputs and measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-TuneLive-Experimental-RealSinger-AB
+          path: human-phase-ab
           if-no-files-found: error
           retention-days: 14
