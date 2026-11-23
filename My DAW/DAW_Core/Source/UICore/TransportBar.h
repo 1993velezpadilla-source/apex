@@ -7,6 +7,8 @@
 #include "../ActionCore/ActionManager.h"
 #include "../ActionCore/ActionID.h"
 #include "ClickToolbarStrip.h"
+#include "MobileTransportPortrait.h"
+#include "MobilePanelGeometry.h"
 #include "../Automation/AutomationSystemCore.h"
 #include "../AutomationCore/PluginAutomationRecorderCore.h"
 
@@ -184,6 +186,16 @@ public:
     /** Quick-access callbacks for panels — wired from MainComponent */
     std::function<void()> onQuickAccessSidePanel;
     std::function<void()> onQuickAccessFxBrowser;
+    std::function<void()> onOpenFloatingMixer;
+    std::function<void()> onOpenBubblegumSends;
+
+    void setPhoneLayout(bool enabled)
+    {
+        if (phoneLayout_ == enabled) return;
+        phoneLayout_ = enabled;
+        resized();
+        repaint();
+    }
 
     /** Fired when the user picks a new project key. Wired from MainComponent. */
     std::function<void(const juce::String&)> onProjectKeyChanged;
@@ -325,6 +337,23 @@ public:
         g.setColour(a.color.cyan);
         g.drawText(clockStr, tb, juce::Justification::centred);
 
+        if (phoneLayout_)
+        {
+            const auto paintAction = [&](juce::Rectangle<int> r, const juce::String& label, juce::Colour tint)
+            {
+                if (r.isEmpty()) return;
+                g.setColour(tint.withAlpha(0.20f));
+                g.fillRoundedRectangle(r.toFloat().reduced(2.f), 7.f);
+                g.setColour(tint.withAlpha(0.65f));
+                g.drawRoundedRectangle(r.toFloat().reduced(2.f), 7.f, 1.f);
+                g.setColour(a.color.textPrimary);
+                g.setFont(juce::Font(juce::FontOptions(12.f, juce::Font::bold)));
+                g.drawText(label, r, juce::Justification::centred);
+            };
+            paintAction(mobileMixerBounds_, "MIXER", a.color.violet);
+            paintAction(mobileSendsBounds_, "SENDS", a.color.magenta);
+        }
+
         // Quick-access panel buttons with icons — shared control-state language
         auto mouse = getMouseXYRelative().toFloat();
         // FX Chain / Side Panel icon — chain links
@@ -365,6 +394,117 @@ public:
 
     void resized() override
     {
+        // A rotation or resized Transport invalidates an in-flight launcher tap.
+        phoneLauncherTap_.invalidate();
+        if (phoneLayout_)
+        {
+            // Portrait-first layout: every important transport action stays visible.
+            // Three rows on a tall phone, two on a short landscape phone.
+            const int w = juce::jmax(0, getWidth());
+            const int h = juce::jmax(0, getHeight());
+            const bool portrait = h >= 144;
+            const int margin = 6;
+            const int gap = 3;
+            const int rowH = juce::jmax(0, (h - (portrait ? 4 : 3) * margin)
+                                        / (portrait ? 3 : 2));
+            const int topY = margin;
+            const int keysWidth = juce::jmax(54, juce::jmin(95, w / 5));
+            const int bpmWidth = juce::jmax(54, juce::jmin(85, w / 5));
+            const int clockWidth = juce::jmax(82, juce::jmin(130, w / 4));
+            auto pos = juce::Rectangle<int>(margin, topY,
+                                            juce::jmax(0, w - 2 * margin), rowH);
+            projectKey_.setBounds(pos.removeFromLeft(juce::jmin(keysWidth, pos.getWidth())));
+            pos.removeFromLeft(gap);
+            tempo_.setBounds(pos.removeFromLeft(juce::jmin(bpmWidth, pos.getWidth())));
+            pos.removeFromLeft(gap);
+            posReadoutBounds_ = pos.removeFromLeft(juce::jmin(clockWidth, pos.getWidth()));
+            pos.removeFromLeft(gap);
+            automArmBtn_.setBounds(pos.removeFromLeft(juce::jmin(72, pos.getWidth())).reduced(1, 2));
+            pos.removeFromLeft(juce::jmin(gap, pos.getWidth()));
+            projectKey_.setVisible(true);
+            tempo_.setVisible(true);
+
+            auto actions = juce::Rectangle<int>(margin, topY + rowH + margin,
+                                                juce::jmax(0, w - 2 * margin), rowH);
+            const int buttonCount = (int) buttons_.size() + 2;
+            const int buttonW = juce::jmax(1,
+                (actions.getWidth() - gap * (buttonCount - 1)) / buttonCount);
+            for (auto* btn : buttons_)
+            {
+                if (btn == nullptr) continue;
+                btn->setBounds(actions.removeFromLeft(buttonW).reduced(1, 0));
+                btn->setVisible(true);
+                actions.removeFromLeft(juce::jmin(gap, actions.getWidth()));
+            }
+            fxBtnBounds_ = actions.removeFromLeft(buttonW);
+            actions.removeFromLeft(juce::jmin(gap, actions.getWidth()));
+            brBtnBounds_ = actions.removeFromLeft(juce::jmax(0, actions.getWidth()));
+            mobileMixerBounds_ = {};
+            mobileSendsBounds_ = {};
+
+            if (portrait)
+            {
+                // Eight controls cannot all provide 44-unit targets on a
+                // 360-unit phone. Keep six transport buttons in the action
+                // row and move FX/Browser to the bottom beside Mixer/Sends.
+                const auto readouts = mobile::portraitReadoutLayout(w, h);
+                const auto readoutRect = [](mobile::PortraitTransportBounds b)
+                {
+                    return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
+                };
+                projectKey_.setBounds(readoutRect(readouts.key));
+                tempo_.setBounds(readoutRect(readouts.tempo));
+                posReadoutBounds_ = readoutRect(readouts.clock);
+                automArmBtn_.setBounds(readoutRect(readouts.automation));
+                projectKey_.setVisible(readouts.key.width > 0);
+                tempo_.setVisible(readouts.tempo.width > 0);
+                automArmBtn_.setVisible(readouts.automation.width > 0);
+                const auto layout = mobile::portraitTransportLayout(w, h);
+                const auto asRect = [](mobile::PortraitTransportBounds b)
+                {
+                    return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
+                };
+                for (int i = 0; i < (int)buttons_.size() && i < 6; ++i)
+                    if (auto* btn = buttons_[(size_t)i])
+                        btn->setBounds(asRect(layout.transport[i]));
+                fxBtnBounds_ = asRect(layout.fx);
+                brBtnBounds_ = asRect(layout.browser);
+                mobileMixerBounds_ = asRect(layout.mixer);
+                mobileSendsBounds_ = asRect(layout.sends);
+                if (clickStrip_)
+                    clickStrip_->setBounds(asRect(layout.click));
+            }
+            else
+            {
+                // Short portrait and landscape: two 44+ unit rows at h >= 94.
+                // Reserve Mixer/Sends instead of allowing readouts to crowd them.
+                const auto layout = mobile::compactPhoneTransportLayout(w, h);
+                const auto asRect = [](mobile::PortraitTransportBounds b)
+                {
+                    return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
+                };
+                for (int i = 0; i < (int)buttons_.size() && i < 6; ++i)
+                    if (auto* btn = buttons_[(size_t)i])
+                        btn->setBounds(asRect(layout.transport[i]));
+                fxBtnBounds_ = asRect(layout.fx);
+                brBtnBounds_ = asRect(layout.browser);
+                mobileMixerBounds_ = asRect(layout.mixer);
+                mobileSendsBounds_ = asRect(layout.sends);
+                projectKey_.setBounds(asRect(layout.key));
+                tempo_.setBounds(asRect(layout.tempo));
+                posReadoutBounds_ = asRect(layout.clock);
+                automArmBtn_.setBounds(asRect(layout.automation));
+                if (clickStrip_)
+                    clickStrip_->setBounds(asRect(layout.click));
+                projectKey_.setVisible(layout.key.width > 0);
+                tempo_.setVisible(layout.tempo.width > 0);
+                // Restore Automation visibility after portrait/landscape resize.
+                automArmBtn_.setVisible(layout.automation.width > 0);
+            }
+            repaint();
+            return;
+        }
+
         const int totalW = getWidth();
         const int totalH = getHeight();
         const int padX   = 8;
@@ -427,6 +567,16 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (phoneLayout_)
+        {
+            // A swipe over the persistent Transport must not open a floating
+            // panel on mouseDown. Defer all four phone launchers to mouseUp.
+            phoneLauncherTap_.begin(static_cast<int>(phoneLauncherAt(e.position)),
+                                    e.source.getIndex());
+            return;
+        }
+
+        // Desktop/iPad keep their existing immediate quick-access behavior.
         if (fxBtnBounds_.toFloat().contains(e.position))
         {
             DBG("[TransportBar] Quick access Side Panel clicked");
@@ -439,6 +589,25 @@ public:
             if (onQuickAccessFxBrowser) onQuickAccessFxBrowser();
             return;
         }
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (phoneLayout_)
+            phoneLauncherTap_.move(e.source.getIndex(),
+                e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY());
+    }
+
+    void mouseUp(const juce::MouseEvent& e) override
+    {
+        if (!phoneLayout_)
+            return;
+
+        const int pressed = phoneLauncherTap_.pressed;
+        if (phoneLauncherTap_.release(e.source.getIndex(),
+                static_cast<int>(phoneLauncherAt(e.position)),
+                e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
+            activatePhoneLauncher(static_cast<PhoneLauncher>(pressed));
     }
 
     void mouseMove(const juce::MouseEvent& e) override
@@ -508,6 +677,41 @@ private:
     juce::OwnedArray<TransportButton> owned_;
     std::vector<TransportButton*>     buttons_;
     std::unique_ptr<ClickToolbarStrip> clickStrip_;
+    bool phoneLayout_ = false;
+    juce::Rectangle<int> mobileMixerBounds_, mobileSendsBounds_;
+
+    enum class PhoneLauncher { None, Mixer, Sends, SidePanel, Browser };
+    mobile::PhoneTransportTapState phoneLauncherTap_;
+
+    PhoneLauncher phoneLauncherAt(juce::Point<float> p) const noexcept
+    {
+        if (mobileMixerBounds_.toFloat().contains(p)) return PhoneLauncher::Mixer;
+        if (mobileSendsBounds_.toFloat().contains(p)) return PhoneLauncher::Sends;
+        if (fxBtnBounds_.toFloat().contains(p)) return PhoneLauncher::SidePanel;
+        if (brBtnBounds_.toFloat().contains(p)) return PhoneLauncher::Browser;
+        return PhoneLauncher::None;
+    }
+
+    void activatePhoneLauncher(PhoneLauncher target)
+    {
+        switch (target)
+        {
+            case PhoneLauncher::Mixer:
+                if (onOpenFloatingMixer) onOpenFloatingMixer();
+                break;
+            case PhoneLauncher::Sends:
+                if (onOpenBubblegumSends) onOpenBubblegumSends();
+                break;
+            case PhoneLauncher::SidePanel:
+                if (onQuickAccessSidePanel) onQuickAccessSidePanel();
+                break;
+            case PhoneLauncher::Browser:
+                if (onQuickAccessFxBrowser) onQuickAccessFxBrowser();
+                break;
+            case PhoneLauncher::None:
+                break;
+        }
+    }
     TransportButton* playBtn_  = nullptr;
     TransportButton* recBtn_   = nullptr;
     TransportButton* loopBtn_  = nullptr;
