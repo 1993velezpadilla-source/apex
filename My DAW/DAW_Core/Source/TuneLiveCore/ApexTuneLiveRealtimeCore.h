@@ -77,7 +77,20 @@ public:
 
     // Deliberately NOT a user-facing plug-in setting. Set only before process()
     // in isolated research tests. The shipping mode remains bit-for-bit default.
-    void setResearchPhaseSlew(bool enabled) noexcept { researchPhaseSlew_ = enabled; }
+    // The host may automate this control at a 128-frame boundary.
+    // Replacing the oscillator's mode in the middle of a vocal phrase can
+    // itself click; arm only when both live and release banks have finished.
+    void setResearchPhaseSlew(bool enabled) noexcept
+    {
+        requestedResearchPhaseSlew_ = enabled;
+        if (bank_.size == 0 && decayLeft_ <= 0 && researchPhaseSlew_ != enabled)
+        {
+            researchPhaseSlew_ = enabled;
+            phaseHz_ = 0.0;
+            phaseLeft_ = 0;
+        }
+    }
+    bool researchPhaseSlewEnabledForTest() const noexcept { return researchPhaseSlew_; }
 
     void process(float* const* data, int channels, int samples, const DspSettings& settings) noexcept
     {
@@ -656,6 +669,7 @@ private:
     unsigned waveformReleaseCount_ = 0;
     bool prepared_ = false;
     bool researchPhaseSlew_ = false;
+    bool requestedResearchPhaseSlew_ = false;
 };
 
 } // namespace APEX::TuneLive

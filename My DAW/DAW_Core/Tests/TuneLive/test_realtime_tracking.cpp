@@ -346,6 +346,36 @@ bool testRealtimeSafety() {
     return clean && allocations.load() == 0 && engines[0].frequencyHz() > 100.0f;
 }
 
+bool testExperimentalToggleDefersUntilUnvoiced() {
+    constexpr int rate=48000;
+    RealtimeCore engine;
+    engine.prepare(rate,1);
+    if(engine.researchPhaseSlewEnabledForTest())return false;
+    engine.setResearchPhaseSlew(true);
+    if(!engine.researchPhaseSlewEnabledForTest())return false;
+    engine.setResearchPhaseSlew(false);
+    if(engine.researchPhaseSlewEnabledForTest())return false;
+
+    auto input=makeVoice(rate,447.691,rate/2);
+    const auto settings=hardTune();
+    for(std::size_t at=0;at<input.size();) {
+        const int count=static_cast<int>(std::min<std::size_t>(127,input.size()-at));
+        float* audio[]{input.data()+at};
+        engine.process(audio,1,count,settings);
+        at+=static_cast<std::size_t>(count);
+    }
+    if(engine.frequencyHz()<100.0f)return false;
+    engine.setResearchPhaseSlew(true);
+    if(engine.researchPhaseSlewEnabledForTest())return false;
+    std::array<float,127> silence{};
+    for(int n=0;n<120;++n) {
+        float* audio[]{silence.data()};
+        engine.process(audio,1,static_cast<int>(silence.size()),settings);
+        engine.setResearchPhaseSlew(true);
+    }
+    return engine.researchPhaseSlewEnabledForTest();
+}
+
 bool testDetectorDropoutStability() {
     constexpr int rate = 48000;
     auto dry = makeVoice(rate, 447.691, rate * 2);
@@ -400,4 +430,5 @@ int main() {
     if (!testNoteTransitions()) { std::cerr << "Excessive note-transition peak or correction step\n"; return 5; }
     if (!testRealtimeSafety()) { std::cerr << "Stereo isolation or realtime allocations\n"; return 4; }
     if (!testDetectorDropoutStability()) { std::cerr << "Tracking pitch dropout click guard\n"; return 7; }
+    if (!testExperimentalToggleDefersUntilUnvoiced()) { std::cerr << "Experimental A/B mode switch must wait for silence\n"; return 8; }
 }
