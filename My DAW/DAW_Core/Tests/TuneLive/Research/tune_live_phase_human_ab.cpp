@@ -12,6 +12,8 @@ namespace {
 struct Report {
     Wave wave;
     double maxStep=0,peak=0,p95=0,medianCents=0;
+    double dryMaxStep=0, maxCorrectionStep=0, maxAddedStep=0;
+    std::size_t worstIndex=0, worstAddedIndex=0, addedStepEvents=0;
     int invalid=0,budget=0;
 };
 double median(std::vector<double> samples,double percentile) {
@@ -55,9 +57,28 @@ Report render(const Wave& source,bool research) {
         const double x=result.wave.data[i];
         if(!std::isfinite(x)){++result.invalid;continue;}
         result.peak=std::max(result.peak,std::abs(x));
-        if(i>=static_cast<std::size_t>(source.channels))
-            result.maxStep=std::max(result.maxStep,std::abs(
-                x-result.wave.data[i-source.channels]));
+        if(i>=static_cast<std::size_t>(source.channels)) {
+            const double outputStep=std::abs(x-result.wave.data[i-source.channels]);
+            const double dryStep=std::abs(source.data[i]-
+                source.data[i-source.channels]);
+            const double diff=static_cast<double>(x)-source.data[i];
+            const double prevDiff=static_cast<double>(
+                result.wave.data[i-source.channels])-source.data[i-source.channels];
+            const double correctionStep=std::abs(diff-prevDiff);
+            const double added=outputStep-dryStep;
+            if(outputStep>result.maxStep) {
+                result.maxStep=outputStep;
+                result.worstIndex=i;
+            }
+            if(added>result.maxAddedStep) {
+                result.maxAddedStep=added;
+                result.worstAddedIndex=i;
+            }
+            result.dryMaxStep=std::max(result.dryMaxStep,dryStep);
+            result.maxCorrectionStep=std::max(result.maxCorrectionStep,correctionStep);
+            if(added>0.04 && correctionStep>0.05)
+                ++result.addedStepEvents;
+        }
     }
     APEX::TuneLive::PitchTracker detector;
     detector.prepare(source.rate);
@@ -76,7 +97,16 @@ void print(const char* mode,const Report& r) {
     std::cout<<std::fixed<<std::setprecision(6)
         <<"{\"mode\":\""<<mode<<"\",\"frames\":"<<r.wave.frames()
         <<",\"rate\":"<<r.wave.rate<<",\"channels\":"<<r.wave.channels
-        <<",\"max_step\":"<<r.maxStep<<",\"peak\":"<<r.peak
+        <<",\"max_step\":"<<r.maxStep
+        <<",\"dry_max_step\":"<<r.dryMaxStep
+        <<",\"max_correction_step\":"<<r.maxCorrectionStep
+        <<",\"max_added_step_over_dry\":"<<r.maxAddedStep
+        <<",\"worst_step_seconds\":"<<static_cast<double>(
+            r.worstIndex/r.wave.channels)/r.wave.rate
+        <<",\"worst_added_seconds\":"<<static_cast<double>(
+            r.worstAddedIndex/r.wave.channels)/r.wave.rate
+        <<",\"likely_added_click_steps\":"<<r.addedStepEvents
+        <<",\"peak\":"<<r.peak
         <<",\"nearest_tet_cents_median\":"<<r.medianCents
         <<",\"callback_p95_ms\":"<<r.p95
         <<",\"callback_over_budget\":"<<r.budget
