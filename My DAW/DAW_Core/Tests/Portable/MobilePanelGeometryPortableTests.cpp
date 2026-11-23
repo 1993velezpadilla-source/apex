@@ -3718,3 +3718,33 @@ constexpr bool pluginBrowserDiagonalTapBoundaryIsSafe = []() constexpr {
     return true;
 }();
 static_assert(pluginBrowserDiagonalTapBoundaryIsSafe);
+
+
+// Phone chrome gesture regression: a finger leaving the tap radius and
+// returning must not activate the original Mixer button. A rotation/resize
+// invalidates the pending press; a fresh stationary press still works.
+constexpr bool phoneChromeGestureCancellationRegression = []() constexpr {
+    using DAW::mobile::PhoneChromeTapState;
+    for (int pressed : { 1, 2, 3, 4 })
+    {
+        PhoneChromeTapState state{};
+        state.begin(pressed);
+        state.move(9, 0);
+        state.move(0, 0);
+        if (state.release(pressed, 0, 0)) return false;
+        state.begin(pressed);
+        state.move(6, 6); // diagonal distance exceeds 8
+        if (state.release(pressed, 0, 0)) return false;
+        state.begin(pressed);
+        state.invalidate(); // device rotation or parent resize
+        if (state.release(pressed, 0, 0)) return false;
+        state.begin(pressed);
+        if (state.release(pressed == 1 ? 2 : 1, 0, 0)) return false;
+        state.begin(pressed);
+        state.move(3, 4);
+        if (!state.release(pressed, 3, 4)) return false;
+        if (state.release(pressed, 0, 0)) return false; // one-shot
+    }
+    return true;
+}();
+static_assert(phoneChromeGestureCancellationRegression);
