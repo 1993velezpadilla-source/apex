@@ -359,13 +359,19 @@ bool testDetectorDropoutStability() {
     RealtimeCore engine;
     engine.prepare(rate, 1);
     const auto settings = hardTune();
-    unsigned shortReleases = 0, longReleases = 0;
+    unsigned shortReleases = 0, longReleases = 0, lastReleases = 0;
     double largestCorrectionStep = 0.0;
     bool finite = true;
     for (int offset = 0; offset < static_cast<int>(wet.size());) {
         const int count = std::min(127, static_cast<int>(wet.size()) - offset);
         float* audio[]{wet.data() + offset};
         engine.process(audio, 1, count, settings);
+        if (engine.waveformReleaseCount() != lastReleases) {
+            std::cout << "Tracking release sample=" << offset
+                      << " active_hz=" << engine.frequencyHz()
+                      << " count=" << engine.waveformReleaseCount() << '\n';
+            lastReleases = engine.waveformReleaseCount();
+        }
         if (offset <= briefEnd + rate / 25 && offset + count > briefEnd + rate / 25)
             shortReleases = engine.waveformReleaseCount();
         if (offset <= longEnd && offset + count > longEnd)

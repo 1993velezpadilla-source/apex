@@ -32,7 +32,7 @@ public:
         // waveform. An immediate bank tear-down on every missed 1-ms hop
         // clicks on breathy syllables and vowel/consonant transitions.
         unvoicedHoldHops_ = std::max(2, static_cast<int>(
-            std::ceil(0.018 * rate_ / tracker_.hopSamples())));
+            std::ceil(0.045 * rate_ / tracker_.hopSamples())));
         // Preserve instantaneous transient attenuation; slow only the
         // correction recovery to prevent sharp upward gain modulation.
         correctionRestoreStep_ = 1.0 / (0.004 * rate_ + 1.0);
@@ -55,7 +55,7 @@ public:
         targetShift_ = shift_ = confidence_ = wet_ = releaseAmount_ = 0.0;
         retune_ = -1.0f;
         controlLeft_ = decayLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
-        missingPitchHops_ = 0;
+        missingPitchHops_ = postDropoutGuardHops_ = 0;
         waveformReleaseCount_ = 0;
         frequency_ = 0.0f;
     }
@@ -248,10 +248,25 @@ private:
             handlePitchLoss();
             return;
         }
+        // Reacquired detector tones can briefly select a harmonic/octave
+        // after an airy break. Do not destroy the phase bank on that single
+        // outlier; require the new distant pitch to persist for ~12 ms.
+        if (missingPitchHops_ > 0 && bank_.size > 0)
+            postDropoutGuardHops_ = std::max(2, static_cast<int>(
+                std::ceil(0.012 * rate_ / tracker_.hopSamples())));
         missingPitchHops_ = 0;
-
-        if (bank_.size > 0 && (pitch.hz > bank_.hz * 1.19 || pitch.hz * 1.19 < bank_.hz))
+        const bool jump = bank_.size > 0 &&
+            (pitch.hz > bank_.hz * 1.19 || pitch.hz * 1.19 < bank_.hz);
+        if (jump && postDropoutGuardHops_ > 0)
+        {
+            --postDropoutGuardHops_;
+            confidence_ = 0.0;
+            return;
+        }
+        if (jump)
             releaseWaveform();
+        else
+            postDropoutGuardHops_ = 0;
         const bool onset = bank_.size == 0;
         const int priorSize = bank_.size;
         frequency_ = pitch.hz;
@@ -455,7 +470,7 @@ private:
         releaseAmount_ = wet_;
         wet_ = shift_ = 0.0;
         controlLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
-        missingPitchHops_ = 0;
+        missingPitchHops_ = postDropoutGuardHops_ = 0;
     }
 
     Sample renderOutgoing(double mix) noexcept
@@ -509,7 +524,7 @@ private:
     int channels_ = 1, decaySamples_ = 2, decayLeft_ = 0, controlLeft_ = 0;
     int neutralHoldSamples_ = 0, neutralLeft_ = 0;
     int fastRetuneSamples_ = 0, fastRetuneLeft_ = 0;
-    int unvoicedHoldHops_ = 2, missingPitchHops_ = 0;
+    int unvoicedHoldHops_ = 2, missingPitchHops_ = 0, postDropoutGuardHops_ = 0;
     unsigned waveformReleaseCount_ = 0;
     bool prepared_ = false;
 };
