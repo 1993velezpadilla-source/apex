@@ -3748,3 +3748,31 @@ constexpr bool phoneChromeGestureCancellationRegression = []() constexpr {
     return true;
 }();
 static_assert(phoneChromeGestureCancellationRegression);
+
+
+// Multi-touch overflow regression for phone Transport launchers. Once all
+// tracked source slots fill, an extra finger must keep the launcher blocked
+// until the gesture is explicitly reset (e.g. after orientation change).
+constexpr bool phoneTransportOverflowCannotRearmLauncher = []() constexpr {
+    using DAW::mobile::PhoneTransportTapState;
+    PhoneTransportTapState state{};
+    state.begin(1, 0);
+    for (int source = 1; source <= PhoneTransportTapState::maxTrackedSources
+                                    + PhoneTransportTapState::maxOverflowSources; ++source)
+        state.begin(1, source);
+    if (!state.untrackedOverflow || !state.blocked || state.eligible)
+        return false;
+    for (int source = 0; source <= PhoneTransportTapState::maxTrackedSources
+                                    + PhoneTransportTapState::maxOverflowSources; ++source)
+        if (state.release(source, 1, 0, 0))
+            return false;
+    state.begin(1, 100);
+    if (state.release(100, 1, 0, 0))
+        return false;
+    state.invalidate();
+    state.begin(1, 100);
+    if (!state.release(100, 1, 0, 0))
+        return false;
+    return !state.release(100, 1, 0, 0);
+}();
+static_assert(phoneTransportOverflowCannotRearmLauncher);
