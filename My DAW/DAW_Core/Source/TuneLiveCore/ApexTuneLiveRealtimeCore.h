@@ -20,6 +20,10 @@ public:
             ? sampleRate : 48000.0;
         channels_ = std::clamp(channels, 1, 2);
         tracker_.prepare(rate_);
+        const int oneMillisecond = static_cast<int>(rate_ * 0.001);
+        fastRetuneSamples_ = std::min(oneMillisecond, tracker_.hopSamples());
+        fastRetuneProgress_ = 1.0 / fastRetuneSamples_;
+        fastWetStep_ = -std::expm1(std::log(0.05) / oneMillisecond);
         inputLevelStep_ = 1.0 / (0.004 * rate_ + 1.0);
         wetStep_ = 1.0 / (0.0015 * rate_ + 1.0);
         formantStep_ = 1.0 / (0.003 * rate_ + 1.0);
@@ -42,7 +46,7 @@ public:
         position_ = filled_ = 0;
         targetShift_ = shift_ = confidence_ = wet_ = releaseAmount_ = 0.0;
         retune_ = -1.0f;
-        controlLeft_ = decayLeft_ = neutralLeft_ = 0;
+        controlLeft_ = decayLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
         frequency_ = 0.0f;
     }
 
@@ -53,19 +57,27 @@ public:
 
     void process(float* const* data, int channels, int samples, const DspSettings& settings) noexcept
     {
+        const bool stereo = channels == 2;
         if (!prepared_ || !data || channels != channels_ || samples <= 0 ||
-            !data[0] || (channels_ == 2 && !data[1]))
+            !data[0] || (stereo && !data[1]))
             return;
 
         const auto unit = [](float value, float fallback) {
             return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : fallback;
         };
         const float retune = unit(settings.retune, 0.20f);
+        const bool fastest = retune == 0.0f;
         if (retune != retune_)
         {
-            const double time = (1.0 + 149.0 * retune) * 0.001;
-            retuneStep_ = 1.0 - std::exp(-kControlHop / (rate_ * time));
             retune_ = retune;
+            if (fastest)
+                beginFastRetune();
+            else
+            {
+                const double time = (1.0 + 149.0 * retune) * 0.001;
+                retuneStep_ = 1.0 - std::exp(-kControlHop / (rate_ * time));
+                fastRetuneLeft_ = 0;
+            }
         }
         tracker_.setVocalRange(settings.vocalRange);
         const VoiceSettings policy{
@@ -83,21 +95,24 @@ public:
 
         for (int i = 0; i < samples; ++i)
         {
-            Sample input{clean(data[0][i]), channels_ == 2 ? clean(data[1][i]) : 0.0};
+            Sample input{clean(data[0][i]), stereo ? clean(data[1][i]) : 0.0};
             for (int c = 0; c < channels_; ++c)
             {
                 const auto channel = static_cast<std::size_t>(c);
                 envelope_[channel] += inputLevelStep_ * (input[channel] * input[channel] - envelope_[channel]);
             }
-            const auto strongest = channels_ == 2 && envelope_[1] > 1.44 * envelope_[0] ? 1u : 0u;
+            const auto strongest = stereo && envelope_[1] > 1.44 * envelope_[0] ? 1u : 0u;
             history_[position_] = {static_cast<float>(input[0]), static_cast<float>(input[1])};
             position_ = (position_ + 1) & (kHistory - 1);
             filled_ = std::min(filled_ + 1, kHistory);
 
-            if (tracker_.push(static_cast<float>(input[strongest])))
+            const bool pitchUpdated = tracker_.push(static_cast<float>(input[strongest]));
+            if (pitchUpdated)
                 followPitch(tracker_.latest(), policy, settings.preserveFormants);
 
-            if (--controlLeft_ <= 0)
+            if (fastest)
+                advanceFastRetune(pitchUpdated);
+            else if (--controlLeft_ <= 0)
             {
                 advanceControl();
                 controlLeft_ = kControlHop;
@@ -111,7 +126,9 @@ public:
             else if (neutralLeft_ > 0)
                 --neutralLeft_;
             const bool correcting = bank_.size > 0 && neutralLeft_ > 0 && policy.correction > 0.0f;
-            wet_ += wetStep_ * ((correcting ? confidence_ * mix : 0.0) - wet_);
+            const double wetTarget = correcting ? confidence_ * mix : 0.0;
+            const double wetStep = fastest && wetTarget > wet_ ? fastWetStep_ : wetStep_;
+            wet_ += wetStep * (wetTarget - wet_);
             if (wet_ < 1.0e-10)
                 wet_ = 0.0;
             if (mix == 0.0 && wet_ == 0.0)
@@ -224,7 +241,16 @@ private:
         const int priorSize = bank_.size;
         frequency_ = pitch.hz;
         bank_.hz = pitch.hz;
+        const bool newShift = onset || targetShift_ != decision.shiftSemitones;
         targetShift_ = decision.shiftSemitones;
+        if (retune_ == 0.0f && newShift)
+        {
+            // A new bank starts in phase with the source. Set its pitch
+            // before it renders the first sample, while the wet gain fades in.
+            if (onset)
+                shift_ = targetShift_;
+            beginFastRetune();
+        }
         confidence_ = std::clamp((pitch.confidence - 0.77) / 0.19, 0.0, 1.0);
         const double safeBand = std::min(6000.0, rate_ * 0.44);
         bank_.size = std::clamp(static_cast<int>(safeBand / bank_.hz), 1, kPartials);
@@ -254,6 +280,34 @@ private:
         shift_ += (targetShift_ - shift_) * retuneStep_;
         if (std::abs(shift_) < 1.0e-8)
             shift_ = 0.0;
+        updateDestinationStep();
+    }
+
+    void beginFastRetune() noexcept
+    {
+        fastRetuneStart_ = shift_;
+        fastRetuneLeft_ = targetShift_ == shift_ ? 0 : fastRetuneSamples_;
+    }
+
+    void advanceFastRetune(bool pitchUpdated) noexcept
+    {
+        if (fastRetuneLeft_ > 0)
+        {
+            // Finish the change between consecutive pitch estimates, within
+            // one millisecond. Keep the oscillator phase continuous.
+            const double t = (fastRetuneSamples_ - --fastRetuneLeft_) * fastRetuneProgress_;
+            shift_ = fastRetuneLeft_ == 0 ? targetShift_
+                : fastRetuneStart_ + t * t * (3.0 - 2.0 * t) * (targetShift_ - fastRetuneStart_);
+        }
+        else if (!pitchUpdated)
+        {
+            return;
+        }
+        updateDestinationStep();
+    }
+
+    void updateDestinationStep() noexcept
+    {
         if (bank_.size == 0)
             return;
         bank_.ratio = std::exp2(shift_ / 12.0);
@@ -359,7 +413,7 @@ private:
         decayLeft_ = decaySamples_;
         releaseAmount_ = wet_;
         wet_ = shift_ = 0.0;
-        controlLeft_ = neutralLeft_ = 0;
+        controlLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
     }
 
     Sample renderOutgoing(double mix) noexcept
@@ -406,10 +460,12 @@ private:
     double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
     double targetShift_ = 0.0, shift_ = 0.0, confidence_ = 0.0, wet_ = 0.0;
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
+    double fastRetuneStart_ = 0.0, fastRetuneProgress_ = 0.0, fastWetStep_ = 0.0;
     float frequency_ = 0.0f, retune_ = -1.0f;
     unsigned position_ = 0, filled_ = 0;
     int channels_ = 1, decaySamples_ = 2, decayLeft_ = 0, controlLeft_ = 0;
     int neutralHoldSamples_ = 0, neutralLeft_ = 0;
+    int fastRetuneSamples_ = 0, fastRetuneLeft_ = 0;
     bool prepared_ = false;
 };
 

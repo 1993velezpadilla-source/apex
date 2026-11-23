@@ -79,6 +79,7 @@ public:
     }
 
     PitchTracker::Result latest() const noexcept { return result_; }
+    int hopSamples() const noexcept { return stride_ * hop_; }
     double hopMilliseconds() const noexcept { return 1000.0 * hop_ / detectorRate_; }
 
 private:

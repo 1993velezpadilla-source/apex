@@ -123,6 +123,72 @@ bool testPitchAndOnset() {
     return true;
 }
 
+bool testFastestRetune() {
+    const auto original = hardTune();
+    const auto processSample = [](RealtimeCore& engine, float sample, const DspSettings& settings) {
+        float* channels[]{&sample};
+        engine.process(channels, 1, 1, settings);
+        return sample;
+    };
+    double worstShiftMs = 0.0, worstPcmMs = 0.0;
+    int cases = 0;
+    for (const int rate : {8000, 44100, 48000, 96000, 192000}) {
+        RealtimePitchTracker clock;
+        clock.prepare(rate);
+        for (const double note : {65.4063913, 110.0, 195.997718, 440.0, 830.609395}) {
+            const auto dry = makeVoice(rate, note * std::exp2(32.0 / 1200.0), rate / 8);
+            auto settings = original;
+            RealtimeCore tuning, unchanged;
+            tuning.prepare(rate, 1);
+            unchanged.prepare(rate, 1);
+            int acquired = -1, retarget = -1;
+            int accepted = -1, applied = -1, changed = -1;
+            double expected = 0.0;
+            for (int i = 0; i < static_cast<int>(dry.size()); ++i) {
+                const bool changeTarget = i == retarget;
+                if (changeTarget)
+                    settings.referenceHz = 432.0f;
+                const float in = dry[static_cast<std::size_t>(i)];
+                const float reference = processSample(unchanged, in, original);
+                const float wet = processSample(tuning, in, settings);
+                const bool firstEstimate = acquired < 0 && tuning.frequencyHz() > 0.0f;
+                if (firstEstimate) {
+                    acquired = i;
+                    retarget = acquired + 48 * clock.hopSamples();
+                }
+                if (firstEstimate || changeTarget) {
+                    const double midi = 69.0 + 12.0 * std::log2(tuning.frequencyHz() /
+                                                                 static_cast<double>(settings.referenceHz));
+                    expected = std::round(midi) - midi;
+                    accepted = i;
+                    applied = changed = -1;
+                }
+                if (accepted < 0)
+                    continue;
+                if (applied < 0 && std::abs(tuning.appliedShiftSemitones() - expected) < 1.0e-5)
+                    applied = i;
+                const float comparison = i < retarget ? in : reference;
+                if (changed < 0 && std::abs(wet - comparison) >= 1.0e-5f)
+                    changed = i;
+                if (i - accepted == rate / 1000) {
+                    if (applied < 0 || changed < 0) {
+                        std::cerr << "rate=" << rate << " note_hz=" << note
+                                  << " retargeted=" << (i >= retarget) << " target_shift=" << expected
+                                  << " applied_sample=" << applied << " changed_sample=" << changed << '\n';
+                        return false;
+                    }
+                    ++cases;
+                    worstShiftMs = std::max(worstShiftMs, (applied - accepted) * 1000.0 / rate);
+                    worstPcmMs = std::max(worstPcmMs, (changed - accepted) * 1000.0 / rate);
+                }
+            }
+        }
+    }
+    std::cout << "fastest_retune_cases=" << cases << " post_detection_target_shift_ms=" << worstShiftMs
+              << " post_detection_first_pcm_delta_ms=" << worstPcmMs << '\n';
+    return cases == 50;
+}
+
 bool testNoteTransitions() {
     constexpr int rate = 48000;
     constexpr int transition = rate * 2 / 5;
@@ -283,6 +349,7 @@ bool testRealtimeSafety() {
 
 int main() {
     if (!testPitchAndOnset()) { std::cerr << "Tracking output pitch or onset\n"; return 1; }
+    if (!testFastestRetune()) { std::cerr << "Fastest retune time after a detected target\n"; return 6; }
     if (!testTimelineAndReset()) { std::cerr << "Timeline, bypass or reset\n"; return 2; }
     if (!testVibrato()) { std::cerr << "Vibrato preservation\n"; return 3; }
     if (!testNoteTransitions()) { std::cerr << "Excessive note-transition peak or correction step\n"; return 5; }
