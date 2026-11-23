@@ -238,8 +238,12 @@ public:
                     const double requestedOutputSlope = drySlope + correctionSlope;
                     const double naturalCap = std::max(0.040,
                         std::abs(drySlope) + 0.010);
-                    const bool anomaly = std::abs(correctionSlope) > 0.065 &&
-                        std::abs(requestedOutputSlope) > naturalCap + 0.015;
+                    // At strong high-register vowels a 0.04-FS correction
+                    // impulse can add to the perfectly natural dry slope.
+                    // Detect the *excess over dry*, not a blanket high-pass
+                    // that clips harmonic-rich singing every sample.
+                    const bool anomaly = std::abs(correctionSlope) > 0.040 &&
+                        std::abs(requestedOutputSlope) > naturalCap + 0.008;
                     if (anomaly)
                         correction += std::clamp(requestedOutputSlope,
                             -naturalCap, naturalCap) - requestedOutputSlope;
