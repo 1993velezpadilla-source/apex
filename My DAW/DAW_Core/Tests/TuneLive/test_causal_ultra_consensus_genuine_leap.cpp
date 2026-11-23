@@ -17,6 +17,7 @@ int main() {
         const auto accelerated=test(sr,false,true,true,true,false);
         const auto guarded=test(sr,false,true,true,true,true);
         const auto chunked=test(sr,true,true,true,true,true);
+        const auto dry=sing(sr);
         double maxChunkDifference=0.0;
         for(std::size_t i=0;i<guarded.output.size();++i)
             maxChunkDifference=std::max(maxChunkDifference,std::abs(
@@ -37,7 +38,15 @@ int main() {
             guarded.noteJumps>=1 && guarded.wet>0.95 &&
             std::abs(cents)<18.0 && guarded.maxStep<0.65 &&
             chunked.maxStep<0.65 && maxChunkDifference<1e-5;
-        const bool pass=realLeap && finalOutput;
+        double correctionStep=1.0;
+        if(guarded.lastJump>0 &&
+           static_cast<std::size_t>(guarded.lastJump)<dry.size()) {
+            const auto at=static_cast<std::size_t>(guarded.lastJump);
+            const double wetStep=guarded.output[at]-guarded.output[at-1];
+            const double dryStep=dry[at]-dry[at-1];
+            correctionStep=std::abs(wetStep-dryStep);
+        }
+        const bool pass=realLeap && finalOutput && correctionStep<0.001;
         passed+=pass;green &=pass;
         std::cout<<"ULTRA_CONSENSUS_GENUINE_LEAP sr="<<sr
                  <<" baseline_ms="<<baselineMs
@@ -47,6 +56,7 @@ int main() {
                  <<" guarded_count="<<guarded.fastTransitions
                  <<" corrected_output_cents="<<cents
                  <<" max_step="<<guarded.maxStep
+                 <<" correction_step_at_model_reset="<<correctionStep
                  <<" callback_partition_diff="<<maxChunkDifference
                  <<" pass="<<pass
                  <<" NOT_1MS_OUTPUT_LATENCY=1\n";

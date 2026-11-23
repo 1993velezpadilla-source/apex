@@ -1,5 +1,5 @@
-// APEX Tune Live RESEARCH ONLY. Controlled 4-hop vs 8-hop YIN cadence.
-// The detector retains 80 decimated samples AND two agreeing candidates.
+// APEX Tune Live upper-register startup with shorter YIN history and cadence.
+// Both detector paths require two agreeing candidates.
 // Actual wet signal from the causal prototype, no input-frequency oracle.
 // Independently measure settled output cents, glitches and false octaves.
 // Faster F0 observation != 1ms acoustic correction / ASIO round-trip.
@@ -40,12 +40,12 @@ int main() {
     int fastAndAccurate=0, protectedLower=0, vetoed=0;
     for(double sr:std::array<double,3>{{44100.,48000.,96000.}}) {
         for(double target:std::array<double,2>{{440.,660.}}) {
-            // Same actual DSP, waveform and 80-frame analysis history.
+            // Measure both detector paths against the same input and shifter.
             const auto previous=run(sr,target,true,true,false,true,false);
             const auto fourHop=run(sr,target,true,true,false,true,true);
             const double savedF0=previous.voiceMs-fourHop.voiceMs;
             const double savedWet=previous.halfWetMs-fourHop.halfWetMs;
-            const bool earlier=savedF0>0.15 && savedWet>0.15 &&
+            const bool earlier=savedF0>=0.6 && savedWet>=0.6 &&
                 fourHop.voiceMs>=5.0 && fourHop.halfWetMs>fourHop.voiceMs;
             const bool audio=fourHop.finite && previous.finite &&
                 fourHop.wetMix>0.95 && fourHop.maxOutputStep<0.65 &&

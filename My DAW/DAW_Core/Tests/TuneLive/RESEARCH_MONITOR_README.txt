@@ -12,8 +12,9 @@ FIRST RUN — SAFETY
 2. In Apollo Console, disable direct/hardware microphone monitoring.
    Otherwise you'll hear a separate DRY copy alongside the processed voice.
 3. Select the desired Windows duplex audio device and microphone channel
-   with the device selector. This CI build has JUCE_ASIO=0 and uses available
-   Windows device backends such as WASAPI; it is NOT an Apollo ASIO test.
+   with the device selector. This preview uses Windows audio backends such
+   as WASAPI. The Apollo Solo ASIO round-trip gate requires the full APEX
+   host and the physical interface.
 4. Check "Headphones connected; direct monitoring disabled".
 5. Press START. The app emits only the processed voice, approximately
    35% of full-scale output gain. It does not provide a safety limiter.
@@ -30,9 +31,8 @@ TECHNICAL LIMITS
 - The native plugin, session automation, ASIO mic-to-ear roundtrip, and full
   musical quality are NOT certified.
 - Pitch correction is hard-tune to A440 chromatic for this prototype.
-- Early-onset detection still needs multiple audio cycles. The first
-  objectively changed output after a brand-new sung A4 was about 7.58ms
-  in the synthetic 48kHz reference test, NOT 1ms corrected vocal reaction.
+- The test reports the first detected note and the corrective mix timing.
+  The Windows driver, interface and headphone path have their own latency.
 - The output may change formants, consonants and attacks.
 - Never enable loudspeaker monitoring or use this for paid session takes.
 

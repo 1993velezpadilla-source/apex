@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 namespace {
 using APEX::TuneLive::Research::HarmonicLivePrototype;
@@ -65,14 +66,16 @@ int main() {
         const int total=static_cast<int>(0.55*rate);
         int offset=0,iteration=0;
         std::array<int,3> sizes{{64,128,257}};
+        std::vector<double> callbackUs;
+        callbackUs.reserve(static_cast<std::size_t>(total/sizes.front()+1));
+        int missedDeadlines=0;
+        double worstCallbackLoad=0.0;
         gCallbackAllocs.store(0,std::memory_order_relaxed);
-        const auto start=std::chrono::steady_clock::now();
         while(offset<total) {
             const int n=std::min(sizes[static_cast<std::size_t>(iteration%3)],
                                  total-offset);
             ++iteration;
-            for(int id=0;id<kTracks;++id) {
-                auto& t=tracks[static_cast<std::size_t>(id)];
+            for(auto& t:tracks) {
                 for(int i=0;i<n;++i) {
                     t.phase+=2.0*pi*t.inputHz/rate;
                     // Harmonic, not source-F0 oracle. Stereo has right-only
@@ -84,12 +87,23 @@ int main() {
                     t.left[static_cast<std::size_t>(i)]=t.channels==1?x:0.0f;
                     t.right[static_cast<std::size_t>(i)]=t.channels==2?x:0.0f;
                 }
-                float* samples[2]={t.left.data(),t.channels==2?t.right.data():nullptr};
-                // Watch exactly the real plugin callback, not generators or
-                // independent analysis on the non-audio test thread.
-                gWatching.store(true,std::memory_order_relaxed);
+            }
+            const auto start=std::chrono::steady_clock::now();
+            gWatching.store(true,std::memory_order_relaxed);
+            for(auto& t:tracks) {
+                float* samples[2]={t.left.data(),
+                                   t.channels==2?t.right.data():nullptr};
                 t.engine.process(samples,t.channels,n);
-                gWatching.store(false,std::memory_order_relaxed);
+            }
+            gWatching.store(false,std::memory_order_relaxed);
+            const auto end=std::chrono::steady_clock::now();
+            const double elapsedUs=
+                std::chrono::duration<double,std::micro>(end-start).count();
+            const double deadlineUs=1.0e6*n/rate;
+            callbackUs.push_back(elapsedUs);
+            worstCallbackLoad=std::max(worstCallbackLoad,elapsedUs/deadlineUs);
+            missedDeadlines+=elapsedUs>deadlineUs;
+            for(auto& t:tracks) {
                 for(int i=0;i<n;++i) {
                     const auto l=t.left[static_cast<std::size_t>(i)];
                     const auto r=t.right[static_cast<std::size_t>(i)];
@@ -103,10 +117,12 @@ int main() {
             }
             offset+=n;
         }
-        const auto end=std::chrono::steady_clock::now();
-        const double processingSeconds=
-            std::chrono::duration<double>(end-start).count();
-        const double audioSeconds=total/rate;
+        std::sort(callbackUs.begin(),callbackUs.end());
+        const auto percentile=[&callbackUs](double p) {
+            const double count=static_cast<double>(callbackUs.size());
+            return callbackUs[static_cast<std::size_t>(
+                std::ceil(p*count)-1)];
+        };
         const int allocations=gCallbackAllocs.load(std::memory_order_relaxed);
         bool safe=allocations==0;
         for(int id=0;id<kTracks;++id) {
@@ -143,9 +159,13 @@ int main() {
                      <<" peak="<<t.peak<<" valid="<<valid<<"\n";
         }
         std::cout<<"CAUSAL_8_INSERT_SUMMARY sr="<<rate
-                 <<" voices="<<kTracks<<" total_audio_s="<<audioSeconds
-                 <<" total_wall_s="<<processingSeconds
-                 <<" wall_to_audio_ratio="<<processingSeconds/audioSeconds
+                 <<" voices="<<kTracks<<" callbacks="<<callbackUs.size()
+                 <<" callback_p50_us="<<percentile(0.50)
+                 <<" callback_p95_us="<<percentile(0.95)
+                 <<" callback_p99_us="<<percentile(0.99)
+                 <<" callback_max_us="<<callbackUs.back()
+                 <<" worst_callback_load="<<worstCallbackLoad
+                 <<" missed_dsp_deadlines="<<missedDeadlines
                  <<" callback_new_calls="<<allocations
                  <<" verdict="<<(safe?"PASS":"FAIL")
                  <<" shared_CI_not_production_CPU_or_ASIO=1\n";

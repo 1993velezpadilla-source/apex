@@ -1,10 +1,11 @@
 #pragma once
-// Experimental ULTRA-HIGH REGISTER YIN hypothesis: 80-frame window.
+// Experimental upper-register YIN with 80-frame and guarded 72-frame windows.
 // Strict 420–1000Hz research range. 392–420Hz stays with the longer mid-register detector.
 // Research-only SHORT-HISTORY YIN onset estimator. Not a replacement for
 // the full C2-capable YIN authority, not shipped, and not a PDC statement.
 // Its harmonic short-window estimate requires two agreeing frames. Frequencies
 // below 420 Hz intentionally have no early-onset claim.
+#include "ApexTuneLiveYinDifference.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -14,6 +15,7 @@ namespace APEX { namespace TuneLive { namespace Research {
 class UltraHighRegisterProbe final {
 public:
     static constexpr int kWindow=80;
+    static constexpr int kFastWindow=72;
     static constexpr int kMaxLag=32;
     static constexpr int kHop=8;
     struct Result {float hz=0.0f,confidence=0.0f;bool voiced=false;};
@@ -47,7 +49,7 @@ public:
         if(filled_<kWindow)++filled_;
         if(++hop_<hopSize_)return false;
         hop_=0;
-        if(filled_<kWindow)return false;
+        if(filled_<analysisWindow_)return false;
         const Result candidate=measure();
         if(candidate.voiced && priorCandidate_>0.0f &&
            std::abs(1200.0f*std::log2(candidate.hz/priorCandidate_))<35.0f) {
@@ -60,12 +62,12 @@ public:
         if(result_.voiced && firstSample_<0)firstSample_=samples_;
         return true;
     }
-    // NONSHIPPING: halve YIN hop from 8 to 4 *decimated* samples.
-    // This saves at most one ~0.33ms analysis interval when a new 80-frame
-    // high note appears; it does NOT shorten acoustic window or prove 1ms.
-    // Configure only when stopped, before push(); never automate from audio.
+    // The shorter window still requires two consistent frames and enough
+    // history to compare the proposed period against its possible octave.
+    // Configure before processing.
     void enableFastHopResearch(bool enabled) noexcept {
         hopSize_=enabled?4:kHop;
+        analysisWindow_=enabled?kFastWindow:kWindow;
         hop_=0;
         stableCount_=0;
         priorCandidate_=0.0f;
@@ -73,29 +75,25 @@ public:
     }
     Result latest() const noexcept {return result_;}
     int64_t firstVoicedSample() const noexcept {return firstSample_;}
-    double minimumWindowMs() const noexcept {return 1000.0*kWindow/detectorRate_;}
+    double minimumWindowMs() const noexcept {return 1000.0*analysisWindow_/detectorRate_;}
     int octaveVetoCount() const noexcept {return octaveVetoCount_;}
 private:
     Result measure() noexcept {
-        const int start=ringPosition_;
+        const int start=(ringPosition_+kWindow-analysisWindow_)%kWindow;
         double energy=0.0;
-        for(int i=0;i<kWindow;++i) {
+        for(int i=0;i<analysisWindow_;++i) {
             const float f=ring_[static_cast<std::size_t>((start+i)%kWindow)];
             frame_[static_cast<std::size_t>(i)]=f;
             energy+=static_cast<double>(f)*f;
         }
-        if(energy<kWindow*0.00002)return {};
-        const int sumLen=kWindow-maxLag_;
+        if(energy<analysisWindow_*0.00002)return {};
+        const int sumLen=analysisWindow_-maxLag_;
         double sum=0.0;
         int best=-1;
         float bestCmndf=1.0f;
         for(int lag=1;lag<=maxLag_;++lag) {
-            double d=0.0;
-            for(int i=0;i<sumLen;++i) {
-                const double delta=static_cast<double>(frame_[static_cast<std::size_t>(i)])-
-                             frame_[static_cast<std::size_t>(i+lag)];
-                d+=delta*delta;
-            }
+            const double d=yinSquaredDifference(frame_.data(),
+                                               frame_.data()+lag,sumLen);
             sum+=d;
             const float norm=sum>1e-16?static_cast<float>(d*lag/sum):1.0f;
             cmndf_[static_cast<std::size_t>(lag)]=norm;
@@ -124,11 +122,11 @@ private:
                 period+=std::clamp(0.5*(a-c)/denom,-0.5,0.5);
         }
         const float hz=static_cast<float>(detectorRate_/period);
-        if(!std::isfinite(hz)||hz<420.0f||hz>1000.0f)return {};
+        const bool shortWindow=analysisWindow_==kFastWindow;
+        if(!std::isfinite(hz)||hz<(shortWindow?430.0f:420.0f)||hz>1000.0f)return {};
         // Guard against notes 220–400Hz masquerading as upper harmonics.
         // A real 220-Hz F0 with a strong 440-Hz harmonic can fool
         // an ~6.7ms short-window YIN detector into a premature A4 lock.
-        // Short window MUST still reject false octave at >=20 matched source samples.
         // Compare the observed waveform error at the candidate lag and
         // TWO candidate periods over an IDENTICAL sample support. A true
         // 220-Hz source repeats at both; a 110-Hz source with audible odd
@@ -136,8 +134,12 @@ private:
         // Fractional interpolation avoids rejecting genuine 220-Hz sources
         // merely because the detector's true period ends in half a sample.
         const double twice=2.0*period;
-        const int count=kWindow-static_cast<int>(std::ceil(twice))-2;
-        if(count>=20) {
+        const int count=analysisWindow_-static_cast<int>(std::ceil(twice))-2;
+        const int minimumSupport=shortWindow
+            ? static_cast<int>(std::ceil(period/2.0))
+            : 20;
+        if(shortWindow && count<minimumSupport)return {};
+        if(count>=minimumSupport) {
             const int lo1=static_cast<int>(period);
             const int lo2=static_cast<int>(twice);
             const double mix1=period-lo1, mix2=twice-lo2;
@@ -165,7 +167,7 @@ private:
            low1_=0.0,low2_=0.0;
     int decimation_=4,minLag_=12,maxLag_=72;
     int ringPosition_=0,filled_=0,substep_=0,hop_=0,stableCount_=0;
-    int hopSize_=kHop; // Off by default; 8 is the tested 80-frame authority.
+    int hopSize_=kHop,analysisWindow_=kWindow;
     int octaveVetoCount_=0;
     int64_t samples_=0,firstSample_=-1;
     float priorCandidate_=0.0f;

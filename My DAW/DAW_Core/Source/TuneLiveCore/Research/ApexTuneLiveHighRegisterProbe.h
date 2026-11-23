@@ -5,6 +5,7 @@
 // the full C2-capable YIN authority, not shipped, and not a PDC statement.
 // Its harmonic short-window estimate requires two agreeing frames. Frequencies
 // below 400 Hz intentionally have no early-onset claim.
+#include "ApexTuneLiveYinDifference.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -79,12 +80,8 @@ private:
         int best=-1;
         float bestCmndf=1.0f;
         for(int lag=1;lag<=maxLag_;++lag) {
-            double d=0.0;
-            for(int i=0;i<sumLen;++i) {
-                const double delta=static_cast<double>(frame_[static_cast<std::size_t>(i)])-
-                             frame_[static_cast<std::size_t>(i+lag)];
-                d+=delta*delta;
-            }
+            const double d=yinSquaredDifference(frame_.data(),
+                                               frame_.data()+lag,sumLen);
             sum+=d;
             const float norm=sum>1e-16?static_cast<float>(d*lag/sum):1.0f;
             cmndf_[static_cast<std::size_t>(lag)]=norm;

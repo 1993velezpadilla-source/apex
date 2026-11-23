@@ -533,8 +533,8 @@ int main() {
     if(!fastResult.voiced || std::abs(fastCents)>18.0 ||
        fastHosted.researchWetMix()<0.95 ||
        fastHosted.firstUltraSample()<0 ||
-       fastFirstF0Ms<6.0 || fastFirstF0Ms>7.3 ||
-       fastHalfWetMs<fastFirstF0Ms || fastHalfWetMs>9.0)
+       fastFirstF0Ms<6.0 || fastFirstF0Ms>6.7 ||
+       fastHalfWetMs<fastFirstF0Ms || fastHalfWetMs>7.8)
         return fail("fast guarded research JUCE first note/wet control or F0 outside measured fixture");
     if(plugin.getLatencySamples()!=1920)
         return fail("hosted research altered shipping HQ40 PDC");

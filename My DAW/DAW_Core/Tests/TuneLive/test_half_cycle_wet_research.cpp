@@ -66,11 +66,12 @@ int main() {
                 maxOutputStep(candidate)<0.65 && oldFirst>=0.0 &&
                 newFirst>=0.0 && candidate.firstPitchSample==old.firstPitchSample;
             const bool upper=target>=400.0;
+            const bool onTime=!upper || !guarded || newWet<=7.8;
             const bool improved=upper && oldWet-newWet>=0.4 &&
                 newFirst<=oldFirst && maxDelta>0.0001;
             const bool untouched=!upper && maxDelta==0.0 &&
                 oldWet==newWet && oldFirst==newFirst;
-            const bool ok=soundSafe && (upper?improved:untouched);
+            const bool ok=soundSafe && onTime && (upper?improved:untouched);
             safe &=ok;
             if(upper){++highCount;highImproved+=ok;}
             else{++lowCount;lowUnchanged+=ok;}
@@ -81,6 +82,8 @@ int main() {
                      <<" wet50_saved_ms="<<oldWet-newWet
                      <<" old_audio_change_ms="<<oldFirst
                      <<" half_cycle_audio_change_ms="<<newFirst
+                     <<" half_cycle_audio_window_end_ms="
+                     <<newFirst+1000.0*(std::ceil(0.001*rate)-1.0)/rate
                      <<" audio_change_saved_ms="<<oldFirst-newFirst
                      <<" candidate_output_cents="<<cents
                      <<" max_output_step="<<maxOutputStep(candidate)

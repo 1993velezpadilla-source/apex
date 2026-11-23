@@ -188,3 +188,35 @@ research paths, with arbitrary host block boundaries; emits the actual
 first F0 acquisition and wet-control time in the same test to prevent
 confusion. New CI gates are research-only. The HQ40 shipping native host
 processor and its original ~40ms PDC remain untouched.
+
+## Desktop candidate verification
+
+The guarded upper-register detector now uses 72 samples at its decimated
+rate, with two agreeing estimates and a required octave check. At a cold
+high-note onset, the shifter initializes its partials from an already
+observed period, so it can begin its wet ramp immediately. During voicing
+loss or a note leap, a one-millisecond crossfade releases the previous
+harmonic model while the input continues at its original sample position.
+The per-sample shifter uses cached harmonic and engagement limits, and
+the short YIN analysis uses vectorizable double-precision reductions.
+
+At 48 kHz in the guarded A4 +30-cent mono regression:
+
+| Measurement | Prior prototype | Desktop candidate |
+| --- | ---: | ---: |
+| First pitch estimate | 6.98 ms | 6.31 ms |
+| First 1 ms window with a measurable output change (start) | 7.58 ms | 6.21 ms |
+| Corrective mix reaches 50% | 8.75 ms | 7.00 ms |
+| Steady output error | 2.70 cents | 2.68 cents |
+| Fixed transient delay with correction engaged | 0 samples | 0 samples |
+
+The candidate's output-change window completes at 7.19 ms. The test
+also verifies the timing at 44.1, 96 and 192 kHz. The leap test now
+measures the correction discontinuity after subtracting the input step.
+At 48 kHz the discontinuity fell from 0.3504 to below 0.000001 on that
+fixture.
+
+The same three Vocadito recordings pass the objective pitch and short
+waveform regressions. The higher-register recording still has four
+octave discrepancies in the sustained-output diagnostic. Blind vocal
+quality checks and physical Apollo Solo round-trip testing remain open.

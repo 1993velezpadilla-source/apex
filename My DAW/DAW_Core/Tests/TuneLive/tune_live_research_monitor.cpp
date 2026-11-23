@@ -77,8 +77,8 @@ int selfTest() {
     const double wet50Ms=1000.0*engine.firstHalfWetSample()/rate;
     const bool passed=finite && std::abs(cents)<18.0 &&
         engine.researchWetMix()>0.95 &&
-        f0Ms>=6.0 && f0Ms<8.0 &&
-        wet50Ms>f0Ms && wet50Ms<9.2;
+        f0Ms>=6.0 && f0Ms<6.7 &&
+        wet50Ms>f0Ms && wet50Ms<7.8;
     juce::Logger::writeToLog(
        "APEX_RESEARCH_MONITOR_SELFTEST pass="+juce::String(passed?1:0)+
        " f0_ms="+juce::String(f0Ms,3)+
@@ -118,13 +118,17 @@ public:
             if(output && output[c])
                 std::fill_n(output[c],frames,0.0f);
         if(!armed_.load(std::memory_order_acquire) ||
-           !input || inChannels<1 || !input[0] ||
+           !input || inChannels<1 ||
            !output || outChannels<1 ||
            static_cast<std::size_t>(frames)>scratch_.size())
             return;
+        const float* microphone=nullptr;
+        for(int c=0;c<inChannels && !microphone;++c)
+            microphone=input[c];
+        if(!microphone)return;
         const std::size_t first=recorded_.load(std::memory_order_relaxed);
         for(int i=0;i<frames;++i) {
-            const float raw=input[0][i];
+            const float raw=microphone[i];
             const float dry=std::isfinite(raw)?std::clamp(raw,-1.0f,1.0f):0.0f;
             scratch_[static_cast<std::size_t>(i)]=dry;
             const auto pos=first+static_cast<std::size_t>(i);
@@ -133,6 +137,7 @@ public:
         recorded_.store(std::min(first+static_cast<std::size_t>(frames),
                                  dryTake_.size()),std::memory_order_release);
         float* mono[1]={scratch_.data()};
+        juce::ScopedNoDenormals noDenormals;
         engine_.process(mono,1,frames);
         for(int c=0;c<outChannels;++c) {
             if(!output[c])continue;

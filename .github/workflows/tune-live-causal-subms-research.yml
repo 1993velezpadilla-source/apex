@@ -5,6 +5,7 @@ on:
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHarmonicLivePrototype.h'
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHighRegisterProbe.h'
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveUltraHighProbe.h'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveYinDifference.h'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_register_early_yin.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_real_wet.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_4hop_research.cpp'

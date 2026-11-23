@@ -83,6 +83,7 @@ public:
     }
     void processBlock(juce::AudioBuffer<float>& buffer,juce::MidiBuffer&) override {
         if(!ready_)return;
+        juce::ScopedNoDenormals noDenormals;
         live_.process(buffer.getArrayOfWritePointers(),
                       buffer.getNumChannels(),buffer.getNumSamples());
     }
