@@ -236,13 +236,17 @@ public:
                     "scanner seeded Bubblegum Delay into cache/browser");
             expect (scanner.getCache().hasCachedEntry ("APEX::ReverieReverb"),
                     "scanner seeded Reverie into cache/browser");
+            expect (scanner.getCache().hasCachedEntry ("APEX::TuneLive"),
+                    "scanner seeded Tune Live for immediate browser discovery");
+            expect (scanner.getCache().hasCachedEntry (APEX::TuneLive::Processor::kTrackingIdentifier),
+                    "scanner seeded the Tracking insert for immediate browser discovery");
             int apexNativeCount = 0;
             for (const auto& c : scanner.getCache().getAll())
                 if (c.format.equalsIgnoreCase ("APEX Native"))
                     ++apexNativeCount;
-            expectEquals (apexNativeCount, 7,
-                          "seven visible native effects: G10/EQ/Opto/C3/Limiter/Delay/Reverie");
-            expect (scanner.getCache().getCount() >= 7, "other cached entries preserved");
+            expectEquals (apexNativeCount, 9,
+                          "nine visible native effects");
+            expect (scanner.getCache().getCount() >= 9, "other cached entries preserved");
         }
     }
 
@@ -320,6 +324,114 @@ public:
             if (restoredProc != nullptr)
                 expectWithinAbsoluteError (G10Test::findParam (*restoredProc, "g10.band31")->getUnitsValue(), 6.0f, 1.0e-3f,
                                       "band31 restored through chain state");
+        }
+
+        // APEX TUNE LIVE — real DAW insert path, not a standalone JUCE
+        // harness: the same PluginChainCore used for G10 and VST3 must
+        // load it, process samples, and preserve its host-saved state.
+        using Tune = APEX::TuneLive::Processor;
+        for (auto engine : {Tune::Engine::Studio, Tune::Engine::Tracking})
+        {
+            const bool tracking = engine == Tune::Engine::Tracking;
+            beginTest (tracking ? "Tune Live Tracking through the APEX PluginChainCore"
+                                : "Tune Live Studio through the APEX PluginChainCore");
+
+            DAW::PluginChainCore chain;
+            chain.prepare (48000.0, 128);
+            chain.setAutomationContext ("tunelivetesttrack", nullptr, nullptr);
+
+            juce::String error;
+            const auto description = DAW::ApexNativePluginFormat::createTuneLiveDescription (engine);
+            const bool inserted = chain.loadPlugin (0, description, manager, error);
+            expect (inserted, "native Tune Live must insert into an APEX track: " + error);
+            if (inserted)
+            {
+                auto* slot = chain.getSlot (0);
+                auto* processor = slot != nullptr ? slot->getProcessor() : nullptr;
+                expect (dynamic_cast<APEX::TuneLive::Processor*> (processor) != nullptr,
+                        "track insert must be the real Tune Live instance");
+                if (processor != nullptr)
+                {
+                    expectEquals (processor->getLatencySamples(), tracking ? 0 : 1920,
+                                  "PluginChain must receive the fixed latency of the selected insert");
+
+                    int automationBound = 0;
+                    using KR = apex::automation::AutomationParameterKeyRegistry;
+                    auto& automation = apex::automation::AutomationSystem::getInstance();
+                    for (auto* parameter : processor->getParameters())
+                    {
+                        auto* tagged = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                        if (tagged == nullptr)
+                            continue;
+                        const auto key = KR::pluginParamKey (
+                            "tunelivetesttrack", 0, description.name,
+                            tagged->paramID);
+                        const auto id = KR::getInstance().findID (key);
+                        if (id != apex::automation::kInvalidParameterID
+                            && automation.getRegistry().find (id) != nullptr)
+                            ++automationBound;
+                    }
+                    expectEquals (automationBound, static_cast<int> (APEX::TuneLive::Processor::kNumParams),
+                                  "all Tune Live parameters must be APEX automation-bound");
+
+                    // The hosted signal is processed through the ACTUAL chain.
+                    auto* correction = processor->getParameters()[APEX::TuneLive::Processor::kAmount];
+                    correction->setValueNotifyingHost (0.735f);
+                    processor->getParameters()[Tune::kVocalRange]->setValueNotifyingHost (1.0f);
+                    processor->getParameters()[Tune::kVibratoPreserve]->setValueNotifyingHost (0.42f);
+                    juce::AudioBuffer<float> block (2, 128);
+                    APEX::TuneLive::PitchTracker chainWetPitch;
+                    chainWetPitch.prepare (48000.0);
+                    for (int offset = 0; offset < 48000; offset += 128)
+                    {
+                        for (int sample = 0; sample < 128; ++sample)
+                        {
+                            const double time = (offset + sample) / 48000.0;
+                            const float input = (float) (0.3 * std::sin (
+                                juce::MathConstants<double>::twoPi * 447.69 * time));
+                            block.setSample (0, sample, input);
+                            block.setSample (1, sample, input);
+                        }
+                        chain.processBlock (block, 128);
+                        if (offset >= 24000)
+                            for (int n = 0; n < 128; ++n)
+                                chainWetPitch.push (block.getSample (0, n));
+                    }
+                    const auto corrected = chainWetPitch.latest();
+                    const double cents = corrected.voiced
+                        ? 1200.0 * std::log2 (corrected.hz / 440.0) : 9999.0;
+                    expect (corrected.voiced && std::abs (cents) < 30.0,
+                            "REAL track chain must actually pitch-correct A4; "
+                            "cents remaining=" + juce::String (cents, 3));
+                    bool allFinite = true;
+                    for (int channel = 0; channel < 2; ++channel)
+                        for (int sample = 0; sample < 128; ++sample)
+                            allFinite = allFinite && std::isfinite (block.getSample (channel, sample));
+                    expect (allFinite, "APEX chain processed live vocal without nonfinite samples");
+
+                    const auto state = chain.getState();
+                    expectEquals (state.getNumChildren(), 1, "one track effect saved");
+                    DAW::PluginChainCore restored;
+                    restored.prepare (48000.0, 128);
+                    restored.restoreState (state, manager);
+                    expectEquals (restored.getNumActiveSlots(), 1,
+                                  "native Tune Live must reopen with the session");
+                    auto* restoredSlot = restored.getSlot (0);
+                    auto* reopened = restoredSlot != nullptr ? restoredSlot->getProcessor() : nullptr;
+                    const auto* restoredTune = dynamic_cast<Tune*> (reopened);
+                    expect (restoredTune != nullptr && restoredTune->isTracking() == tracking,
+                            "restored DAW session must use the saved Tune Live engine");
+                    if (reopened != nullptr)
+                    {
+                        expectEquals (reopened->getLatencySamples(), tracking ? 0 : 1920);
+                        expectWithinAbsoluteError (reopened->getParameters()[Tune::kAmount]->getValue(),
+                                                   0.735f, 1.0e-4f);
+                        expectWithinAbsoluteError (reopened->getParameters()[Tune::kVibratoPreserve]->getValue(),
+                                                   0.42f, 1.0e-4f);
+                        expectEquals (reopened->getParameters()[Tune::kVocalRange]->getValue(), 1.0f);
+                    }
+                }
+            }
         }
 
         // Test seam: appendPluginInstanceForTesting.

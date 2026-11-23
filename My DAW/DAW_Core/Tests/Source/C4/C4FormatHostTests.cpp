@@ -202,9 +202,9 @@ private:
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
-            expectEquals (found.size(), 7,
-                          "discover G10, EQ, Opto 2A, Precision C, Limiter, Delay and Reverie");
-            if (found.size() == 7)
+            expectEquals (found.size(), 9,
+                          "discover G10, EQ, Opto 2A, Precision C, Limiter, Delay, Reverie and both Tune Live inserts");
+            if (found.size() == 9)
             {
                 expectEquals (found[0]->fileOrIdentifier, juce::String ("APEX::G10"));
                 expectEquals (found[1]->fileOrIdentifier, juce::String (
@@ -214,9 +214,65 @@ private:
                 expectEquals (found[4]->fileOrIdentifier, juce::String ("APEX::BubblegumLimiter"));
                 expectEquals (found[5]->fileOrIdentifier, juce::String ("APEX::BubblegumDelay"));
                 expectEquals (found[6]->fileOrIdentifier, juce::String ("APEX::ReverieReverb"));
+                expectEquals (found[7]->fileOrIdentifier, juce::String ("APEX::TuneLive"));
+                expectEquals (found[8]->fileOrIdentifier, juce::String (APEX::TuneLive::Processor::kTrackingIdentifier));
             }
             for (const auto* item : found)
                 expect (item->fileOrIdentifier != "APEX::C4", "unfinished C4 remains hidden");
+        }
+
+        // The new native vocal insert must be constructible by the SAME
+        // AudioPluginFormatManager that also creates G10/C4/EQ.
+        {
+            juce::String error;
+            auto tune = manager.createPluginInstance (
+                DAW::ApexNativePluginFormat::createTuneLiveDescription(),
+                48000.0, 128, error);
+            expect (tune != nullptr, "unified native host must create Tune Live: " + error);
+            if (tune != nullptr)
+            {
+                expect (dynamic_cast<APEX::TuneLive::Processor*> (tune.get()) != nullptr,
+                        "host created the real Tune Live processor");
+                expectEquals (tune->getNumParameters(),
+                              static_cast<int> (APEX::TuneLive::Processor::kNumParams),
+                              "all native parameters are hosted");
+                tune->prepareToPlay (48000.0, 128);
+                expectEquals (tune->getLatencySamples(), 1920,
+                              "production native Tune Live reports honest 40-ms plugin PDC");
+
+                // Verify all native parameter IDs are discoverable by the
+                // existing APEX automation-binding mechanism. This tests
+                // the actual manager-created instance, not a mock processor.
+                int tagged = 0;
+                for (auto* parameter : tune->getParameters())
+                    if (dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+                        ++tagged;
+                expectEquals (tagged, static_cast<int> (APEX::TuneLive::Processor::kNumParams),
+                              "APEX automation finds IDs on every Tune Live parameter");
+
+                // Persist a host-created instance into project-style
+                // binary state and reopen into an independent instance.
+                auto* amount = tune->getParameters()[APEX::TuneLive::Processor::kAmount];
+                amount->setValueNotifyingHost (0.735f);
+                juce::MemoryBlock projectState;
+                tune->getStateInformation (projectState);
+                expect (projectState.getSize() > 0, "host obtains session state");
+                juce::String reopenError;
+                auto reopen = manager.createPluginInstance (
+                    DAW::ApexNativePluginFormat::createTuneLiveDescription(),
+                    48000.0, 128, reopenError);
+                expect (reopen != nullptr,
+                        "saved Tune Live must reopen through the native format: " + reopenError);
+                if (reopen != nullptr)
+                {
+                    reopen->setStateInformation (projectState.getData(),
+                                                 static_cast<int> (projectState.getSize()));
+                    expectWithinAbsoluteError (
+                        reopen->getParameters()[APEX::TuneLive::Processor::kAmount]->getValue(),
+                        0.735f, 1.0e-4f,
+                        "correction amount survives a real host session reload");
+                }
+            }
         }
 
         // Foreign identifiers still resolve to a clean error, never a crash.

@@ -130,7 +130,10 @@ jobs:
           # Allow portrait + landscape under Android auto-rotate preferences;
           # packaging is NOT a device rotation test.
           grep -q 'android:screenOrientation="user"' "$MANIFEST"
-          if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-frame-cache" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-tunelive-20261123" ]]; then
+            grep -q "com.xziel.apex.tunelivepreview.ApexImmersiveActivity" "$MANIFEST"
+            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/tunelivepreview/ApexImmersiveActivity.java"
+          elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-frame-cache" ]]; then
             grep -q "com.xziel.apex.framecache.ApexImmersiveActivity" "$MANIFEST"
             test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/framecache/ApexImmersiveActivity.java"
           elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-zoom-rewrite" ]]; then
@@ -198,7 +201,9 @@ jobs:
             unsigned="android-release-real-apk/apex-release-unsigned-tmp-${found}.apk"
             aligned="android-release-real-apk/apex-release-aligned-tmp-${found}.apk"
             output="android-release-real-apk/APEX-Android-Original-Release-Optimized-ARM64-Preview-${found}.apk"
-            if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-frame-cache" ]]; then
+            if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-tunelive-20261123" ]]; then
+              output="android-release-real-apk/APEX-Mobile-TuneLive-${GITHUB_SHA:0:8}-ARM64-${found}.apk"
+            elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-frame-cache" ]]; then
               output="android-release-real-apk/APEX-Frame-Cache-${GITHUB_SHA:0:8}-ARM64-${found}.apk"
             elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-zoom-rewrite" ]]; then
               output="android-release-real-apk/APEX-Zoom-Rewrite-${GITHUB_SHA:0:8}-ARM64-${found}.apk"
