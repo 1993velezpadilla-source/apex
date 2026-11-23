@@ -33,9 +33,8 @@ public:
         // clicks on breathy syllables and vowel/consonant transitions.
         unvoicedHoldHops_ = std::max(2, static_cast<int>(
             std::ceil(0.018 * rate_ / tracker_.hopSamples())));
-        // A fast transient clamp and slower recovery prevent gain zipper
-        // noise while keeping consonant protection responsive.
-        correctionSuppressStep_ = 1.0 / (0.0005 * rate_ + 1.0);
+        // Preserve instantaneous transient attenuation; slow only the
+        // correction recovery to prevent sharp upward gain modulation.
         correctionRestoreStep_ = 1.0 / (0.004 * rate_ + 1.0);
         decaySamples_ = std::max(2, static_cast<int>(std::ceil(0.0015 * rate_)));
         neutralHoldSamples_ = static_cast<int>(std::lround(0.045 * rate_));
@@ -428,9 +427,13 @@ private:
             const double fade = std::clamp((mismatch - tolerance) / transitionWidth, 0.0, 1.0);
             const double requestedGain = 1.0 - fade * fade * (3.0 - 2.0 * fade);
             auto& correctionGain = bank_.correctionGain[channel];
-            const double gainStep = requestedGain < correctionGain
-                ? correctionSuppressStep_ : correctionRestoreStep_;
-            correctionGain += gainStep * (requestedGain - correctionGain);
+            // Keep protective attenuation immediate: slowing the attack
+            // created oversized peaks on abrupt real note transitions.
+            // Only the recovery is slewed, preventing rapid upward zipper.
+            if (requestedGain < correctionGain)
+                correctionGain = requestedGain;
+            else
+                correctionGain += correctionRestoreStep_ * (requestedGain - correctionGain);
             for (int h = 0; h < bank_.size; ++h)
             {
                 const auto bin = static_cast<std::size_t>(h);
@@ -497,7 +500,7 @@ private:
     Bank bank_{}, outgoing_{};
     Sample envelope_{}, lastCorrection_{}, releaseOffset_{};
     double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
-    double correctionSuppressStep_ = 0.0, correctionRestoreStep_ = 0.0;
+    double correctionRestoreStep_ = 0.0;
     double targetShift_ = 0.0, shift_ = 0.0, confidence_ = 0.0, wet_ = 0.0;
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
     double fastRetuneStart_ = 0.0, fastRetuneProgress_ = 0.0, fastWetStep_ = 0.0;
