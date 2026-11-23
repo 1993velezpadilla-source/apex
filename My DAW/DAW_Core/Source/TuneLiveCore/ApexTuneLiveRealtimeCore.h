@@ -23,6 +23,7 @@ public:
         inputLevelStep_ = 1.0 / (0.004 * rate_ + 1.0);
         wetStep_ = 1.0 / (0.0015 * rate_ + 1.0);
         formantStep_ = 1.0 / (0.003 * rate_ + 1.0);
+        agreementStep_ = 1.0 / (0.00030 * rate_ + 1.0);
         decaySamples_ = std::max(2, static_cast<int>(std::ceil(0.0015 * rate_)));
         neutralHoldSamples_ = static_cast<int>(std::lround(0.045 * rate_));
         reset();
@@ -151,6 +152,7 @@ private:
         std::array<std::array<Partial, kPartials>, 2> partials{};
         std::array<double, kPartials> gain{}, targetGain{}, weight{};
         Phase source, destination, sourceStep, destinationStep;
+        Sample residualPower{}, correctionGain{1.0, 1.0};
         double hz = 0.0, ratio = 1.0, learningStep = 0.0;
         int size = 0;
     };
@@ -325,8 +327,19 @@ private:
         for (int c = 0; c < channels_; ++c)
         {
             const auto channel = static_cast<std::size_t>(c);
-            const double error = (input[channel] - predicted[channel]) * bank_.learningStep;
-            delta[channel] += wet_ * correction[channel];
+            const double residual = input[channel] - predicted[channel];
+            const double error = residual * bank_.learningStep;
+            // Back off when the harmonic model stops explaining this input,
+            // as happens at a consonant or a new note. Use the previous
+            // sample's gain so the current unmodelled transient passes on time.
+            delta[channel] += wet_ * bank_.correctionGain[channel] * correction[channel];
+            bank_.residualPower[channel] += agreementStep_ *
+                (residual * residual - bank_.residualPower[channel]);
+            const double mismatch = bank_.residualPower[channel] / std::max(1.0e-9, envelope_[channel]);
+            constexpr double tolerance = 0.08;
+            constexpr double transitionWidth = 0.45;
+            const double fade = std::clamp((mismatch - tolerance) / transitionWidth, 0.0, 1.0);
+            bank_.correctionGain[channel] = 1.0 - fade * fade * (3.0 - 2.0 * fade);
             for (int h = 0; h < bank_.size; ++h)
             {
                 const auto bin = static_cast<std::size_t>(h);
@@ -372,7 +385,7 @@ private:
         for (int c = 0; c < channels_; ++c)
         {
             const auto channel = static_cast<std::size_t>(c);
-            delta[channel] *= releaseAmount_;
+            delta[channel] *= releaseAmount_ * outgoing_.correctionGain[channel];
             if (decayLeft_ == decaySamples_)
                 releaseOffset_[channel] = lastCorrection_[channel] - delta[channel];
             delta[channel] = window * (delta[channel] + window * releaseOffset_[channel]);
@@ -390,7 +403,7 @@ private:
     std::array<std::array<float, 2>, kHistory> history_{};
     Bank bank_{}, outgoing_{};
     Sample envelope_{}, lastCorrection_{}, releaseOffset_{};
-    double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0;
+    double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
     double targetShift_ = 0.0, shift_ = 0.0, confidence_ = 0.0, wet_ = 0.0;
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
     float frequency_ = 0.0f, retune_ = -1.0f;

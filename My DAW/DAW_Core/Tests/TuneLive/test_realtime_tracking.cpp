@@ -13,6 +13,15 @@
 namespace {
 std::atomic<bool> watchAllocations{false};
 std::atomic<unsigned> allocations{0};
+
+#if defined(_MSC_VER)
+__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+void releaseTestAllocation(void* pointer) noexcept {
+    std::free(pointer);
+}
 }
 
 void* operator new(std::size_t size) {
@@ -23,10 +32,10 @@ void* operator new(std::size_t size) {
     throw std::bad_alloc();
 }
 void* operator new[](std::size_t size) { return ::operator new(size); }
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+void operator delete(void* p) noexcept { releaseTestAllocation(p); }
+void operator delete[](void* p) noexcept { releaseTestAllocation(p); }
+void operator delete(void* p, std::size_t) noexcept { releaseTestAllocation(p); }
+void operator delete[](void* p, std::size_t) noexcept { releaseTestAllocation(p); }
 
 namespace {
 using namespace APEX::TuneLive;
@@ -112,6 +121,53 @@ bool testPitchAndOnset() {
         }
     }
     return true;
+}
+
+bool testNoteTransitions() {
+    constexpr int rate = 48000;
+    constexpr int transition = rate * 2 / 5;
+    constexpr int length = transition + rate / 8;
+    constexpr std::array<std::array<double,2>,8> pairs{{
+        {110.0, 220.0}, {220.0, 110.0}, {196.0, 392.0}, {392.0, 196.0},
+        {220.0, 440.0}, {440.0, 220.0}, {329.628, 493.883}, {493.883, 329.628}
+    }};
+    const auto settings = hardTune();
+    RealtimeCore engine;
+    engine.prepare(rate, 1);
+    std::vector<float> dry(length);
+    double worstPeakRatio = 0.0;
+    float worstCorrectionStep = 0.0f;
+    for (const auto& notes : pairs) {
+        for (const double offset : {-27.0, 30.0}) {
+            const double sourceShift = std::exp2(offset / 1200.0);
+            for (int seed = 0; seed < 6; ++seed) {
+                const double phaseOffset = seed * tau / 6.0;
+                double phase = 0.0;
+                double inputPeak = 0.0, outputPeak = 0.0;
+                for (int i = 0; i < length; ++i) {
+                    const auto note = notes[i < transition ? 0 : 1] * sourceShift;
+                    phase += tau * note / rate;
+                    const double angle = phase + phaseOffset;
+                    const auto value = static_cast<float>(0.255 * std::sin(angle) +
+                        0.13 * std::sin(2.0 * angle + 0.4) + 0.052 * std::sin(3.0 * angle - 0.55));
+                    dry[static_cast<std::size_t>(i)] = value;
+                    inputPeak = std::max(inputPeak, std::abs(static_cast<double>(value)));
+                }
+                auto wet = dry;
+                engine.reset();
+                run(engine, wet, settings, 119);
+                for (auto i = static_cast<std::size_t>(transition); i < wet.size(); ++i) {
+                    outputPeak = std::max(outputPeak, std::abs(static_cast<double>(wet[i])));
+                    const float step = (wet[i] - dry[i]) - (wet[i - 1] - dry[i - 1]);
+                    worstCorrectionStep = std::max(worstCorrectionStep, std::abs(step));
+                }
+                worstPeakRatio = std::max(worstPeakRatio, outputPeak / inputPeak);
+            }
+        }
+    }
+    std::cout << "note_transition_cases=96 max_peak_ratio=" << worstPeakRatio
+              << " max_correction_sample_step=" << worstCorrectionStep << '\n';
+    return worstPeakRatio < 1.55 && worstCorrectionStep < 0.17f;
 }
 
 bool testTimelineAndReset() {
@@ -229,5 +285,6 @@ int main() {
     if (!testPitchAndOnset()) { std::cerr << "Tracking output pitch or onset\n"; return 1; }
     if (!testTimelineAndReset()) { std::cerr << "Timeline, bypass or reset\n"; return 2; }
     if (!testVibrato()) { std::cerr << "Vibrato preservation\n"; return 3; }
+    if (!testNoteTransitions()) { std::cerr << "Excessive note-transition peak or correction step\n"; return 5; }
     if (!testRealtimeSafety()) { std::cerr << "Stereo isolation or realtime allocations\n"; return 4; }
 }
