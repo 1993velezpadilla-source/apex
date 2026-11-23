@@ -369,6 +369,10 @@ bool testExperimentalToggleDefersUntilUnvoiced() {
     if(engine.researchPhaseSlewEnabledForTest())return false;
     std::array<float,127> silence{};
     for(int n=0;n<120;++n) {
+        // The insert writes into its buffer. Every callback must receive
+        // *fresh zero* input, or the synthesized tail is fed back as a
+        // fake microphone and the bank never becomes unvoiced.
+        silence.fill(0.0f);
         float* audio[]{silence.data()};
         engine.process(audio,1,static_cast<int>(silence.size()),settings);
         engine.setResearchPhaseSlew(true);
