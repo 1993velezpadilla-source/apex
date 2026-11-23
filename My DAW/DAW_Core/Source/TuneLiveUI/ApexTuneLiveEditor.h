@@ -144,6 +144,20 @@ public:
                            bypass_.getToggleState()?1.0f:0.0f);};
         addAndMakeVisible(bypass_);
 
+        if (processor_.isTracking()) {
+            experimentalDeclick_.setButtonText("ANTI-CLICK A/B (EXPERIMENTAL)");
+            experimentalDeclick_.setTooltip(
+                "Compare original Tracking (Off) against the phase-declick research variant (On). "
+                "For clean A/B, stop playback before changing this setting.");
+            experimentalDeclick_.setColour(juce::ToggleButton::textColourId,
+                                          juce::Colour::fromRGB(255, 211, 142));
+            experimentalDeclick_.onClick=[this](){
+                setParameter(Processor::kExperimentalDeclick,
+                             experimentalDeclick_.getToggleState()?1.0f:0.0f);
+            };
+            addAndMakeVisible(experimentalDeclick_);
+        }
+
         for(int i=0;i<3;++i) {
             auto& button=styles_[static_cast<std::size_t>(i)];
             button.setButtonText(kVocalStyles[static_cast<std::size_t>(i)].name);
@@ -430,6 +444,8 @@ public:
         formants_.setBounds(10, 472, half + 20, 38);
         bypass_.setBounds(half + 26, 472, half - 36, 38);
         latencyLabel_.setBounds(10, 520, width - 20, 26);
+        if (processor_.isTracking())
+            experimentalDeclick_.setBounds(10, 550, width - 20, 40);
         return;
 #endif
         const float sx=getWidth()/1200.0f,sy=getHeight()/750.0f;
@@ -453,6 +469,8 @@ public:
         formants_.setBounds(box(788,640,246,40));
         bypass_.setBounds(box(1037,640,137,40));
         latencyLabel_.setBounds(box(792,688,360,26));
+        if (processor_.isTracking())
+            experimentalDeclick_.setBounds(box(792,715,370,26));
     }
 
 private:
@@ -545,6 +563,10 @@ private:
                                  juce::dontSendNotification);
         bypass_.setToggleState(parameter(Processor::kBypass).getValue()>=0.5f,
                                juce::dontSendNotification);
+        if (processor_.isTracking())
+            experimentalDeclick_.setToggleState(
+                parameter(Processor::kExperimentalDeclick).getValue()>=0.5f,
+                juce::dontSendNotification);
         const auto hz=processor_.detectedFrequencyHz();
         trackedHz_=hz;
         trackedCents_=0.0f;
@@ -601,7 +623,7 @@ private:
     std::array<juce::TextButton,3> styles_;
     juce::ComboBox keys_,scales_,ranges_;
     juce::Slider reference_;
-    juce::ToggleButton formants_,bypass_;
+    juce::ToggleButton formants_,bypass_,experimentalDeclick_;
     juce::Label pitchLabel_,pitchCaption_,latencyLabel_;
 };
 

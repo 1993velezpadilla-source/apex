@@ -28,7 +28,7 @@ int main() {
        || desc.uniqueId!=APEX::TuneLive::Processor::kUniqueId)
         return fail("unstable native plugin identifier");
     if(plugin.getParameters().size()!=APEX::TuneLive::Processor::kNumParams)
-        return fail("expected 13 hosted/automation-safe parameters");
+        return fail("expected all hosted/automation-safe parameters including opt-in research");
 
     plugin.prepareToPlay(48000.0,128);
     if(plugin.getLatencySamples()!=1920)
@@ -79,6 +79,9 @@ int main() {
     juce::PluginDescription trackingDescription;
     tracking.fillInPluginDescription(trackingDescription);
     tracking.prepareToPlay(48000.0,128);
+    auto* researchParameter=tracking.getParameters()[Tune::kExperimentalDeclick];
+    if (researchParameter->getValue()!=0.0f)
+        return fail("experimental phase declick MUST default OFF in all saved projects");
     if (trackingDescription.fileOrIdentifier != Tune::kTrackingIdentifier
         || trackingDescription.uniqueId != Tune::kTrackingUniqueId
         || tracking.getLatencySamples() != 0)
@@ -90,6 +93,25 @@ int main() {
             rangeBox = combo;
     if (!rangeBox)
         return fail("missing Tracking vocal range menu");
+    // The experimental toggle must be reachable in the real editor and
+    // bound to an actual automatable, serialized parameter.
+    juce::ToggleButton* researchButton=nullptr;
+    for (auto* component : trackingEditor->getChildren())
+        if (auto* toggle=dynamic_cast<juce::ToggleButton*>(component);
+            toggle && toggle->getButtonText().contains("ANTI-CLICK A/B"))
+            researchButton=toggle;
+    if (!researchButton)
+        return fail("missing opt-in Tracking anti-click A/B control");
+    researchButton->triggerClick();
+    if (researchParameter->getValue()!=1.0f)
+        return fail("Tracking anti-click A/B GUI parameter was not updated");
+    juce::MemoryBlock researchState;
+    tracking.getStateInformation(researchState);
+    researchParameter->setValueNotifyingHost(0.0f);
+    tracking.setStateInformation(researchState.getData(),static_cast<int>(researchState.getSize()));
+    if (researchParameter->getValue()!=1.0f)
+        return fail("Tracking experimental A/B parameter did not restore from project");
+    researchParameter->setValueNotifyingHost(0.0f);
     rangeBox->setSelectedId(4,juce::sendNotificationSync);
     if (rangeBox->getText() != "High" ||
         tracking.getParameters()[Tune::kVocalRange]->getValue() != 1.0f)
