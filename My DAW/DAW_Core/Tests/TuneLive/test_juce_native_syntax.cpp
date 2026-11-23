@@ -11,7 +11,9 @@ static_assert(std::is_base_of<juce::AudioPluginFormat,DAW::ApexNativePluginForma
               "APEX Tune Live must be registered inside the host's unified native format");
 static_assert(APEX::TuneLive::Processor::kA4Reference==10 &&
               APEX::TuneLive::Processor::kVocalRange==11 &&
-              APEX::TuneLive::Processor::kNumParams==13,
+              APEX::TuneLive::Processor::kVibratoPreserve==12 &&
+              APEX::TuneLive::Processor::kExperimentalDeclick==13 &&
+              APEX::TuneLive::Processor::kNumParams==14,
               "Append new parameters; don't reorder existing automation IDs");
 void apexTuneLiveCompileOnly()
 {
