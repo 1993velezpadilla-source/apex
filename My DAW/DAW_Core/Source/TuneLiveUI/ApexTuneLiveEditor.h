@@ -17,10 +17,15 @@ public:
         setOpaque(true);
         setLookAndFeel(&studioLook_);
         setResizable(true, true);
+#if JUCE_ANDROID
+        setResizeLimits(280, 360, 1600, 1600);
+        setSize(360, 610);
+#else
         // Controls/latency readout occupy rows through y=516; a 480px
         // editor cut off the last row. Enforce a true touch-safe minimum.
         setResizeLimits(960, 600, 1600, 1000);
         setSize(1200, 750);
+#endif
 
         constexpr std::array<const char*,7> names{{
             "CORRECTION", "RE-TUNE", "HUMANIZE", "VIBRATO", "FLEX TUNE", "STABILITY", "WET"
@@ -28,7 +33,11 @@ public:
         for (std::size_t i=0; i<knobs_.size(); ++i) {
             auto& knob=knobs_[i];
             knob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+#if JUCE_ANDROID
+            knob.setTextBoxStyle(juce::Slider::TextBoxBelow,false,60,20);
+#else
             knob.setTextBoxStyle(juce::Slider::TextBoxBelow,false,88,27);
+#endif
             knob.setRange(0.0,1.0,0.001);
             // User-facing engineering units; normalized parameter values
             // remain stable for existing DAW host automation and state.
@@ -135,6 +144,20 @@ public:
                            bypass_.getToggleState()?1.0f:0.0f);};
         addAndMakeVisible(bypass_);
 
+        if (processor_.isTracking()) {
+            experimentalDeclick_.setButtonText("ANTI-CLICK A/B (EXPERIMENTAL)");
+            experimentalDeclick_.setTooltip(
+                "Compare original Tracking (Off) against the phase-declick research variant (On). "
+                "For clean A/B, stop playback before changing this setting.");
+            experimentalDeclick_.setColour(juce::ToggleButton::textColourId,
+                                          juce::Colour::fromRGB(255, 211, 142));
+            experimentalDeclick_.onClick=[this](){
+                setParameter(Processor::kExperimentalDeclick,
+                             experimentalDeclick_.getToggleState()?1.0f:0.0f);
+            };
+            addAndMakeVisible(experimentalDeclick_);
+        }
+
         for(int i=0;i<3;++i) {
             auto& button=styles_[static_cast<std::size_t>(i)];
             button.setButtonText(kVocalStyles[static_cast<std::size_t>(i)].name);
@@ -159,6 +182,9 @@ public:
             addAndMakeVisible(*label);
         }
         pitchLabel_.setFont(juce::Font(juce::FontOptions(72.0f).withStyle("Bold")));
+#if JUCE_ANDROID
+        pitchLabel_.setFont(juce::Font(juce::FontOptions(34.0f).withStyle("Bold")));
+#endif
         pitchLabel_.setJustificationType(juce::Justification::centred);
         pitchLabel_.setColour(juce::Label::textColourId,
                               juce::Colour::fromRGB(250,205,151));
@@ -175,6 +201,20 @@ public:
     // Child controls are repositioned with the same transform in resized().
     // Every element is real JUCE vector paint, not a flattened screenshot.
     void paint(juce::Graphics& g) override {
+#if JUCE_ANDROID
+        g.fillAll(Visual::midnight());
+        g.setColour(Visual::ivory());
+        g.setFont(juce::Font(juce::FontOptions(18.0f).withStyle("Bold")));
+        g.drawText(processor_.isTracking() ? "APEX TUNE LIVE TRACKING" : "APEX TUNE LIVE",
+                   10, 5, getWidth() - 20, 26, juce::Justification::centredLeft);
+        g.setColour(Visual::muted());
+        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.drawText("KEY", 12, 94, getWidth() / 2 - 16, 16, juce::Justification::centredLeft);
+        g.drawText("SCALE", getWidth() / 2 + 4, 94, getWidth() / 2 - 16, 16, juce::Justification::centredLeft);
+        g.drawText("VOCAL RANGE", 12, 154, getWidth() / 2 - 16, 16, juce::Justification::centredLeft);
+        g.drawText("REFERENCE", getWidth() / 2 + 4, 154, getWidth() / 2 - 16, 16, juce::Justification::centredLeft);
+        return;
+#endif
         juce::Graphics::ScopedSaveState saved(g);
         g.addTransform(juce::AffineTransform::scale(getWidth()/1200.0f,getHeight()/750.0f));
         g.setColour(Visual::midnight());
@@ -382,6 +422,32 @@ public:
     }
 
     void resized() override {
+#if JUCE_ANDROID
+        const int width = getWidth();
+        const int half = width / 2;
+        pitchLabel_.setBounds(10, 30, half - 20, 53);
+        pitchCaption_.setBounds(half, 42, half - 10, 24);
+        keys_.setBounds(10, 110, half - 18, 38);
+        scales_.setBounds(half + 2, 110, half - 12, 38);
+        ranges_.setBounds(10, 170, half - 18, 38);
+        reference_.setBounds(half + 2, 170, half - 12, 38);
+        const int cellWidth = (width - 20) / 4;
+        for (std::size_t i = 0; i < knobs_.size(); ++i) {
+            const int x = 10 + static_cast<int>(i % 4) * cellWidth;
+            const int y = 218 + static_cast<int>(i / 4) * 100;
+            knobLabels_[i].setBounds(x, y, cellWidth, 20);
+            knobs_[i].setBounds(x, y + 20, cellWidth, 77);
+        }
+        for (int i = 0; i < 3; ++i)
+            styles_[static_cast<std::size_t>(i)].setBounds(10 + i * (width - 20) / 3,
+                                                         424, (width - 26) / 3, 38);
+        formants_.setBounds(10, 472, half + 20, 38);
+        bypass_.setBounds(half + 26, 472, half - 36, 38);
+        latencyLabel_.setBounds(10, 520, width - 20, 26);
+        if (processor_.isTracking())
+            experimentalDeclick_.setBounds(10, 550, width - 20, 40);
+        return;
+#endif
         const float sx=getWidth()/1200.0f,sy=getHeight()/750.0f;
         const auto box=[sx,sy](int x,int y,int w,int h){
             return juce::Rectangle<int>(juce::roundToInt(x*sx),juce::roundToInt(y*sy),
@@ -403,6 +469,8 @@ public:
         formants_.setBounds(box(788,640,246,40));
         bypass_.setBounds(box(1037,640,137,40));
         latencyLabel_.setBounds(box(792,688,360,26));
+        if (processor_.isTracking())
+            experimentalDeclick_.setBounds(box(792,715,370,26));
     }
 
 private:
@@ -495,6 +563,10 @@ private:
                                  juce::dontSendNotification);
         bypass_.setToggleState(parameter(Processor::kBypass).getValue()>=0.5f,
                                juce::dontSendNotification);
+        if (processor_.isTracking())
+            experimentalDeclick_.setToggleState(
+                parameter(Processor::kExperimentalDeclick).getValue()>=0.5f,
+                juce::dontSendNotification);
         const auto hz=processor_.detectedFrequencyHz();
         trackedHz_=hz;
         trackedCents_=0.0f;
@@ -551,7 +623,7 @@ private:
     std::array<juce::TextButton,3> styles_;
     juce::ComboBox keys_,scales_,ranges_;
     juce::Slider reference_;
-    juce::ToggleButton formants_,bypass_;
+    juce::ToggleButton formants_,bypass_,experimentalDeclick_;
     juce::Label pitchLabel_,pitchCaption_,latencyLabel_;
 };
 
