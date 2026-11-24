@@ -58,7 +58,7 @@ public:
         lastCorrection_.fill(0.0);
         lastDry_.fill(0.0);
         releaseOffset_.fill(0.0);
-        position_ = filled_ = 0;
+        position_ = filled_ = detectorChannel_ = 0;
         targetShift_ = shift_ = confidence_ = wet_ = releaseAmount_ = 0.0;
         retune_ = -1.0f;
         controlLeft_ = decayLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
@@ -138,12 +138,21 @@ public:
                 const auto channel = static_cast<std::size_t>(c);
                 envelope_[channel] += inputLevelStep_ * (input[channel] * input[channel] - envelope_[channel]);
             }
-            const auto strongest = stereo && envelope_[1] > 1.44 * envelope_[0] ? 1u : 0u;
+            // Retain the selected microphone until the other channel is
+            // genuinely stronger. A single asymmetric threshold could
+            // flip back and forth at equal level, inserting a phase jump
+            // into the detector (especially for opposite-polarity stereo).
+            if (stereo)
+            {
+                const auto other = 1u - detectorChannel_;
+                if (envelope_[other] > 1.44 * envelope_[detectorChannel_])
+                    detectorChannel_ = other;
+            }
             history_[position_] = {static_cast<float>(input[0]), static_cast<float>(input[1])};
             position_ = (position_ + 1) & (kHistory - 1);
             filled_ = std::min(filled_ + 1, kHistory);
 
-            const bool pitchUpdated = tracker_.push(static_cast<float>(input[strongest]));
+            const bool pitchUpdated = tracker_.push(static_cast<float>(input[detectorChannel_]));
             if (pitchUpdated)
                 followPitch(tracker_.latest(), policy, settings.preserveFormants);
 
@@ -697,7 +706,7 @@ private:
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
     double fastRetuneStart_ = 0.0, fastRetuneProgress_ = 0.0, fastWetStep_ = 0.0;
     float frequency_ = 0.0f, retune_ = -1.0f;
-    unsigned position_ = 0, filled_ = 0;
+    unsigned position_ = 0, filled_ = 0, detectorChannel_ = 0;
     int channels_ = 1, decaySamples_ = 2, decayLeft_ = 0, controlLeft_ = 0;
     int phaseLeft_ = 0, researchDecaySamples_ = 2, decaySpan_ = 2;
     int neutralHoldSamples_ = 0, neutralLeft_ = 0;
