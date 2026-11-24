@@ -186,9 +186,9 @@ public:
             // during a bank handoff. Previously both corrections were at
             // near-full level for the first millisecond, making a transient
             // at pitch leaps despite a smoothed phase increment. Keep the
-            // shipping path untouched until a real-singer audit passes.
+            // existing decay duration and apply the envelope in both modes.
             double incomingWeight = 1.0;
-            if (researchPhaseSlew_ && decayLeft_ > 0 && bank_.size > 0)
+            if (decayLeft_ > 0 && bank_.size > 0)
             {
                 const double t = static_cast<double>(decayLeft_) / decaySpan_;
                 const double oldWeight = t * t * (3.0 - 2.0 * t);
@@ -197,7 +197,7 @@ public:
             Sample delta = renderOutgoing(mix);
             if (bank_.size > 0)
             {
-                if (researchPhaseSlew_ && incomingWeight < 1.0)
+                if (incomingWeight < 1.0)
                 {
                     Sample incoming{};
                     renderAndLearn(input, incoming);
