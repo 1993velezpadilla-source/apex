@@ -256,6 +256,56 @@ bool testNoteTransitions() {
            handoffs > 0 && worstHandoffStep < 2.0e-6;
 }
 
+bool testBypassAtBankRelease() {
+    // Bypass may land on the exact sample that releases an old oscillator.
+    // That sample must begin the fade at the prior correction, not at zero.
+    constexpr int rate=48000, length=rate/2, change=rate/4;
+    const auto settings=hardTune();
+    unsigned exercised=0;
+    double worst=0.0;
+    for(int seed=0;seed<6;++seed) {
+        std::vector<float> dry(length);
+        double phase=seed*tau/6.0;
+        for(int i=0;i<length;++i) {
+            phase+=tau*(i<change?227.0:453.0)/rate;
+            dry[i]=static_cast<float>(0.26*std::sin(phase)+0.09*std::sin(2*phase+0.4));
+        }
+        RealtimeCore probe, candidate;
+        probe.prepare(rate,1);
+        candidate.prepare(rate,1);
+        int release=-1;
+        double last=0.0;
+        for(int i=0;i<length;++i) {
+            float value=dry[i];float* data[]={&value};
+            const auto before=probe.waveformReleaseCount();
+            probe.process(data,1,1,settings);
+            if(i>=change && probe.waveformReleaseCount()!=before && std::abs(last)>1e-4) {
+                release=i;break;
+            }
+            last=static_cast<double>(value)-dry[i];
+        }
+        if(release<0)continue;
+        auto bypass=settings;
+        bypass.bypass=true;
+        double previous=0.0;
+        for(int i=0;i<length;++i) {
+            float value=dry[i];float* data[]={&value};
+            candidate.process(data,1,1,i<release?settings:bypass);
+            const double correction=static_cast<double>(value)-dry[i];
+            if(!std::isfinite(value))return false;
+            if(i==release) {
+                worst=std::max(worst,std::abs(correction-previous));
+                ++exercised;
+            }
+            if(i>release+rate/10 && value!=dry[i])return false;
+            previous=correction;
+        }
+    }
+    std::cout<<"bypass_on_bank_release_cases="<<exercised
+             <<" worst_first_sample_step="<<worst<<'\n';
+    return exercised>0 && worst<2e-6;
+}
+
 bool testTimelineAndReset() {
     constexpr int rate = 48000;
     constexpr int impulsePosition = 14399;
@@ -452,6 +502,7 @@ bool testDetectorDropoutStability() {
 int main() {
     if (!testPitchAndOnset()) { std::cerr << "Tracking output pitch or onset\n"; return 1; }
     if (!testFastestRetune()) { std::cerr << "Fastest retune time after a detected target\n"; return 6; }
+    if (!testBypassAtBankRelease()) { std::cerr << "Bypass truncated outgoing correction fade\\n"; return 9; }
     if (!testTimelineAndReset()) { std::cerr << "Timeline, bypass or reset\n"; return 2; }
     if (!testVibrato()) { std::cerr << "Vibrato preservation\n"; return 3; }
     if (!testNoteTransitions()) { std::cerr << "Excessive note-transition peak or correction step\n"; return 5; }
