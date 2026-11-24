@@ -160,6 +160,19 @@ jobs:
           fi
           test -s "$HOME/.android/debug.keystore"
 
+      # Share Gradle dependency downloads between source-only rebuilds.
+      # Keep the generated wrapper and exporter definitions in the cache key;
+      # do not cache build outputs or signing keys.
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper/dists
+          key: apex-android-gradle-${{ runner.os }}-${{ hashFiles('My DAW/DAW_Core/Builds/AndroidFull/gradle/wrapper/gradle-wrapper.properties', 'My DAW/DAW_Core/Builds/AndroidFull/build.gradle', 'My DAW/DAW_Core/Builds/AndroidFull/settings.gradle', 'My DAW/DAW_Core/Builds/AndroidFull/app/build.gradle') }}
+          restore-keys: |
+            apex-android-gradle-${{ runner.os }}-
+
       - name: Build full original APEX for Android ARM64 with release compiler optimizations
         shell: bash
         working-directory: My DAW/DAW_Core/Builds/AndroidFull
@@ -182,7 +195,7 @@ jobs:
               exit 1
             fi
             if [ "$attempt" -eq 3 ]; then exit 1; fi
-            sleep $((attempt * 10))
+            sleep $((attempt * 60))
           done
 
       - name: Sign and verify RELEASE-optimized ARM64 preview APK
