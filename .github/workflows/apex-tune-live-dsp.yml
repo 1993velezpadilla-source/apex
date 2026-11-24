@@ -186,6 +186,23 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" -o tune_live_audition
           ./tune_live_audition --self-test tune_live_audition
           ./tune_live_audition --input tune_live_audition_source.wav --prefix tune_live_reload
+  release-tracking-performance:
+    # Sanitizer timing is not representative of a shipping real-time build.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Optimized Tracking regression and CPU telemetry (not device xrun proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -Werror -pedantic \
+            "My DAW/DAW_Core/Tests/TuneLive/test_realtime_tracking.cpp" -o tune_live_tracking_release
+          ./tune_live_tracking_release | tee tracking-release-telemetry.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tracking-release-telemetry
+          path: tracking-release-telemetry.txt
   msvc-windows:
     runs-on: windows-2022
     steps:
