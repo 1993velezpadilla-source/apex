@@ -96,7 +96,7 @@ double measuredCents(const std::vector<float>& audio, int rate, double target) {
     return 1200.0 * std::log2(expectedLag / (bestLag + fraction));
 }
 
-bool testPitchAndOnset() {
+bool testPitchAndOnset(bool research=false) {
     const auto settings = hardTune();
     for (const int rate : {44100, 48000, 96000, 192000}) {
         constexpr std::array<double, 5> notes{65.4063913, 110.0, 195.997718, 440.0, 830.609395};
@@ -107,6 +107,7 @@ bool testPitchAndOnset() {
             auto wet = dry;
             RealtimeCore engine;
             engine.prepare(rate, 1);
+        engine.setResearchPhaseSlew(research);
             run(engine, wet, settings, 127);
             int changed = 0;
             while (changed < rate &&
@@ -123,7 +124,7 @@ bool testPitchAndOnset() {
     return true;
 }
 
-bool testFastestRetune() {
+bool testFastestRetune(bool research=false) {
     const auto original = hardTune();
     const auto processSample = [](RealtimeCore& engine, float sample, const DspSettings& settings) {
         float* channels[]{&sample};
@@ -140,7 +141,9 @@ bool testFastestRetune() {
             auto settings = original;
             RealtimeCore tuning, unchanged;
             tuning.prepare(rate, 1);
+        tuning.setResearchPhaseSlew(research);
             unchanged.prepare(rate, 1);
+        unchanged.setResearchPhaseSlew(research);
             int acquired = -1, retarget = -1;
             int accepted = -1, applied = -1, changed = -1;
             double expected = 0.0;
@@ -189,7 +192,7 @@ bool testFastestRetune() {
     return cases == 50;
 }
 
-bool testNoteTransitions() {
+bool testNoteTransitions(bool research=false) {
     constexpr int rate = 48000;
     constexpr int transition = rate * 2 / 5;
     constexpr int length = transition + rate / 8;
@@ -200,6 +203,7 @@ bool testNoteTransitions() {
     const auto settings = hardTune();
     RealtimeCore engine;
     engine.prepare(rate, 1);
+        engine.setResearchPhaseSlew(research);
     std::vector<float> dry(length);
     double worstPeakRatio = 0.0;
     float worstCorrectionStep = 0.0f;
@@ -306,7 +310,7 @@ bool testBypassAtBankRelease() {
     return exercised>0 && worst<2e-6;
 }
 
-bool testTimelineAndReset() {
+bool testTimelineAndReset(bool research=false) {
     constexpr int rate = 48000;
     constexpr int impulsePosition = 14399;
     const auto settings = hardTune();
@@ -315,8 +319,11 @@ bool testTimelineAndReset() {
     hit[impulsePosition] += 0.11f;
     RealtimeCore fixed, alternate, transient;
     fixed.prepare(rate, 1);
+        fixed.setResearchPhaseSlew(research);
     alternate.prepare(rate, 1);
+        alternate.setResearchPhaseSlew(research);
     transient.prepare(rate, 1);
+        transient.setResearchPhaseSlew(research);
     run(fixed, a, settings, 128);
     run(alternate, b, settings, 1);
     run(transient, hit, settings, 127);
@@ -338,7 +345,7 @@ bool testTimelineAndReset() {
     return a == b;
 }
 
-bool testVibrato() {
+bool testVibrato(bool research=false) {
     constexpr int rate = 48000;
     auto plain = hardTune(), preserve = plain;
     plain.stability = preserve.stability = 0.8f;
@@ -354,6 +361,7 @@ bool testVibrato() {
     auto hard = dry, expressive = dry;
     RealtimeCore engine;
     engine.prepare(rate, 1);
+        engine.setResearchPhaseSlew(research);
     run(engine, hard, plain, 128);
     engine.reset();
     run(engine, expressive, preserve, 128);
@@ -506,7 +514,7 @@ bool testExperimentalToggleDefersUntilUnvoiced() {
     return !engine.researchPhaseSlewEnabledForTest();
 }
 
-bool testDetectorDropoutStability() {
+bool testDetectorDropoutStability(bool research=false) {
     constexpr int rate = 48000;
     auto dry = makeVoice(rate, 447.691, rate * 2);
     // Airy singing: a brief 8-ms unvoiced hole followed by a later real
@@ -518,6 +526,7 @@ bool testDetectorDropoutStability() {
     auto wet = dry;
     RealtimeCore engine;
     engine.prepare(rate, 1);
+        engine.setResearchPhaseSlew(research);
     const auto settings = hardTune();
     unsigned shortReleases = 0, longReleases = 0, lastReleases = 0;
     double largestCorrectionStep = 0.0;
@@ -563,5 +572,13 @@ int main() {
     if (!testDetectorDropoutStability()) { std::cerr << "Tracking pitch dropout click guard\n"; return 7; }
     if (!testStereoDetectorHysteresis()) { std::cerr << "Stereo detector phase chatter\\n"; return 10; }
     if (!testPhaseModeScales()) { std::cerr << "Experimental phase mode C major/minor accuracy\\n"; return 11; }
+    std::cout<<"PHASE_MODE_EXTENDED_REGRESSION_BEGIN\\n";
+    if (!testPitchAndOnset(true)) { std::cerr<<"Phase mode pitch/onset\\n"; return 12; }
+    if (!testFastestRetune(true)) { std::cerr<<"Phase mode retune timing\\n"; return 13; }
+    if (!testTimelineAndReset(true)) { std::cerr<<"Phase mode timeline/reset\\n"; return 14; }
+    if (!testVibrato(true)) { std::cerr<<"Phase mode vibrato\\n"; return 15; }
+    if (!testNoteTransitions(true)) { std::cerr<<"Phase mode note transitions\\n"; return 16; }
+    if (!testDetectorDropoutStability(true)) { std::cerr<<"Phase mode dropout\\n"; return 17; }
+    std::cout<<"PHASE_MODE_EXTENDED_REGRESSION_PASS\\n";
     if (!testExperimentalToggleDefersUntilUnvoiced()) { std::cerr << "Experimental A/B mode switch must wait for silence\n"; return 8; }
 }
