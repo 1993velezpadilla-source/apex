@@ -38,6 +38,10 @@ exactly_one(
     void setResearchCompensationEnabled(bool value) noexcept {enabled_=value;}
     void prepare(double sampleRate,int maxBlockSize,int numChannels,""")
 exactly_one(
+    "                stretch_.setTransposeFactor(std::pow(2.0f,smooth_/12.0f));",
+    """                const float corrected=enabled_?experimentalDownshift(smooth_,frequency_):smooth_;
+                stretch_.setTransposeFactor(std::pow(2.0f,corrected/12.0f));""")
+exactly_one(
     "                stretch_.setTransposeFactor(std::exp2(smooth_/12.0f));",
     """                const float corrected=enabled_?experimentalDownshift(smooth_,frequency_):smooth_;
                 stretch_.setTransposeFactor(std::exp2(corrected/12.0f));""")
