@@ -389,14 +389,16 @@ bool testVibrato(bool research=false) {
            && natural[1] > 1.7 * fixed[1] && std::abs(natural[0]) < 10.0;
 }
 
-bool testRealtimeSafety() {
+bool testRealtimeSafety(bool research=false) {
     constexpr int rate = 48000, block = 128, inserts = 8, blocks = 375;
     const auto source = makeVoice(rate, 113.1, block * blocks);
     std::array<RealtimeCore, inserts> engines;
     std::array<double, blocks> times{};
     bool clean = true;
-    for (auto& engine : engines)
+    for (auto& engine : engines) {
         engine.prepare(rate, 2);
+        engine.setResearchPhaseSlew(research);
+    }
     auto settings = hardTune();
     watchAllocations.store(true, std::memory_order_relaxed);
     for (int i = 0; i < blocks; ++i) {
@@ -419,8 +421,14 @@ bool testRealtimeSafety() {
     }
     watchAllocations.store(false, std::memory_order_relaxed);
     std::sort(times.begin(), times.end());
-    std::cout << "eight_stereo_inserts_48k128_p95_ms=" << times[times.size() * 95 / 100]
+    const double p95=times[times.size() * 95 / 100];
+    std::cout << "research_phase=" << research << " eight_stereo_inserts_48k128_p95_ms=" << p95
               << " callback_cpp_allocations=" << allocations.load() << '\n';
+    // Only the optimized build is eligible for the CPU budget gate.
+    // Host-runner p95 is not a guarantee of device xrun-free operation.
+#if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_UNDEFINED__)
+    if (p95 >= 1000.0 * block / rate) return false;
+#endif
     return clean && allocations.load() == 0 && engines[0].frequencyHz() > 100.0f;
 }
 
@@ -576,6 +584,7 @@ int main() {
     if (!testPitchAndOnset(true)) { std::cerr<<"Phase mode pitch/onset\\n"; return 12; }
     if (!testFastestRetune(true)) { std::cerr<<"Phase mode retune timing\\n"; return 13; }
     if (!testTimelineAndReset(true)) { std::cerr<<"Phase mode timeline/reset\\n"; return 14; }
+    if (!testRealtimeSafety(true)) { std::cerr<<"Phase mode realtime CPU or allocations\n"; return 18; }
     if (!testVibrato(true)) { std::cerr<<"Phase mode vibrato\\n"; return 15; }
     if (!testNoteTransitions(true)) { std::cerr<<"Phase mode note transitions\\n"; return 16; }
     if (!testDetectorDropoutStability(true)) { std::cerr<<"Phase mode dropout\\n"; return 17; }
