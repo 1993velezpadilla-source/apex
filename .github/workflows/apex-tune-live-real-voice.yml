@@ -174,6 +174,63 @@ jobs:
           grep -q 'profile=high' VOCADITO_REGISTER_MATRIX_LICENSE.txt
           test -s vocadito_low_PITCH_COMPARISON.txt
           test -s vocadito_high_PITCH_COMPARISON.txt
+      - name: Compare production Tracking before and after harmonic taper smoothing
+        shell: bash
+        run: |
+          set -euo pipefail
+          CORE='My DAW/DAW_Core/Source/TuneLiveCore'
+          TEST='My DAW/DAW_Core/Tests/TuneLive/Research'
+          BASE=327266ed876a417c019e73ef4ac7f7cf67e1f0aa
+          git fetch --no-tags --depth=1 origin "$BASE"
+          git show "$BASE:$CORE/ApexTuneLiveRealtimeCore.h" > "$CORE/_baseline_tracking_core.h"
+          sed 's@/ApexTuneLiveRealtimeCore.h"@/_baseline_tracking_core.h"@' \
+            "$TEST/tune_live_phase_human_ab.cpp" > "$TEST/_baseline_tracking_ab.cpp"
+          trap 'rm -f "$CORE/_baseline_tracking_core.h" "$TEST/_baseline_tracking_ab.cpp"' EXIT
+          for version in baseline candidate; do
+            src="$TEST/tune_live_phase_human_ab.cpp"
+            if [[ "$version" == baseline ]]; then src="$TEST/_baseline_tracking_ab.cpp"; fi
+            g++ -std=c++17 -O3 -Wall -Wextra -Werror \
+              -isystem 'My DAW/DAW_Core/Source/ThirdParty' \
+              -isystem 'My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch' \
+              "$src" -o "/tmp/tracking-$version"
+            mkdir -p tracking-taper-ab
+            for voice in human low high; do
+              "/tmp/tracking-$version" --input "vocadito_${voice}_source.wav" \
+                --prefix "tracking-taper-ab/$version-$voice" | tee "tracking-taper-ab/$version-$voice.jsonl"
+            done
+          done
+          python3 - <<'PY'
+          import json, pathlib
+          root = pathlib.Path('tracking-taper-ab')
+          results = []
+          for voice in ('human', 'low', 'high'):
+              a,b = [json.loads((root/f'{v}-{voice}.jsonl').read_text().splitlines()[0])
+                     for v in ('baseline','candidate')]
+              assert a['mode']==b['mode']=='original'
+              assert a['frames']==b['frames'] and a['rate']==b['rate']
+              assert a['nonfinite']==b['nonfinite']==0
+              assert .85 <= b['rms']/max(a['rms'],1e-9) <= 1.15
+              assert b['nearest_tet_cents_median'] <= a['nearest_tet_cents_median']+3
+              results.append({'voice':voice,'baseline':a,'candidate':b,
+                  'added_step_delta':b['max_added_step_over_dry']-a['max_added_step_over_dry'],
+                  'likely_event_delta':b['likely_added_click_steps']-a['likely_added_click_steps']})
+          (root/'comparison.json').write_text(json.dumps(results,indent=2))
+          print(json.dumps(results,indent=2))
+          # Do not certify audible clicks solely from PCM derivatives.
+          # Preserve this evidence even if the candidate worsens.
+          assert all(r['added_step_delta']<=.01 and
+                     r['candidate']['likely_added_click_steps']<=
+                     r['baseline']['likely_added_click_steps']*1.10+3
+                     for r in results), 'Tracking taper candidate worsened real singer discontinuity proxy'
+          PY
+      - name: Upload Tracking baseline vs candidate voice evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracking-taper-real-voice-ab
+          path: tracking-taper-ab/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Render separate predictive LIVE (early-onset) real singer A-B — research only
         shell: bash
         run: |
