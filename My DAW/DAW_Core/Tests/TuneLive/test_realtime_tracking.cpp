@@ -416,6 +416,59 @@ bool testRealtimeSafety() {
     return clean && allocations.load() == 0 && engines[0].frequencyHz() > 100.0f;
 }
 
+bool testStereoDetectorHysteresis() {
+    constexpr int rate=48000, length=rate*2;
+    const auto dry=makeVoice(rate,227.0,length);
+    RealtimeCore engine;
+    engine.prepare(rate,2);
+    auto settings=hardTune();
+    int bad=0, voiced=0;
+    for(int i=0;i<length;++i) {
+        // Right starts clearly dominant, then hovers around the old
+        // one-way 1.44 power-ratio threshold, with inverted polarity.
+        const double ratio=i<rate/4?1.6:1.20+0.12*std::sin(tau*17.0*i/rate);
+        float l=dry[i],r=static_cast<float>(-ratio*dry[i]);
+        float* audio[]={&l,&r};
+        engine.process(audio,2,1,settings);
+        if(!std::isfinite(l)||!std::isfinite(r))return false;
+        if(i>rate/2 && i%48==0) {
+            const double hz=engine.frequencyHz();
+            if(hz>0.0) {
+                ++voiced;
+                if(std::abs(1200.0*std::log2(hz/227.0))>30.0)++bad;
+            }
+        }
+    }
+    std::cout<<"stereo_detector_voiced_frames="<<voiced<<" incorrect_f0="<<bad<<'\n';
+    return voiced>1400 && bad==0;
+}
+
+bool testPhaseModeScales() {
+    constexpr int rate=48000;
+    // Inputs close to notes unique to C major/minor and to excluded
+    // chromatic tones. Measure the rendered PCM, not the MIDI policy.
+    constexpr std::array<std::array<int,3>,6> cases{{
+        {1,64,64},{2,63,63},{1,69,69},{2,68,68},{1,61,62},{2,61,62}
+    }};
+    for(const auto& item:cases) {
+        auto settings=hardTune();
+        settings.key=0;settings.scale=item[0];
+        const double input=440.0*std::exp2((item[1]-69+0.27)/12.0);
+        const double target=440.0*std::exp2((item[2]-69)/12.0);
+        auto wet=makeVoice(rate,input,rate);
+        auto alt=wet;
+        RealtimeCore a,b;
+        a.prepare(rate,1);b.prepare(rate,1);
+        a.setResearchPhaseSlew(true);b.setResearchPhaseSlew(true);
+        run(a,wet,settings,128);run(b,alt,settings,1);
+        const double cents=measuredCents(wet,rate,target);
+        std::cout<<"phase_scale="<<item[0]<<" input_midi="<<item[1]
+                 <<" target_midi="<<item[2]<<" output_cents="<<cents<<'\n';
+        if(wet!=alt || !std::isfinite(cents) || std::abs(cents)>8.0)return false;
+    }
+    return true;
+}
+
 bool testExperimentalToggleDefersUntilUnvoiced() {
     constexpr int rate=48000;
     RealtimeCore engine;
@@ -508,5 +561,7 @@ int main() {
     if (!testNoteTransitions()) { std::cerr << "Excessive note-transition peak or correction step\n"; return 5; }
     if (!testRealtimeSafety()) { std::cerr << "Stereo isolation or realtime allocations\n"; return 4; }
     if (!testDetectorDropoutStability()) { std::cerr << "Tracking pitch dropout click guard\n"; return 7; }
+    if (!testStereoDetectorHysteresis()) { std::cerr << "Stereo detector phase chatter\\n"; return 10; }
+    if (!testPhaseModeScales()) { std::cerr << "Experimental phase mode C major/minor accuracy\\n"; return 11; }
     if (!testExperimentalToggleDefersUntilUnvoiced()) { std::cerr << "Experimental A/B mode switch must wait for silence\n"; return 8; }
 }
