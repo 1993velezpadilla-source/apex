@@ -20,12 +20,17 @@ namespace APEX { namespace TuneLive {
 // Experimental 18ms and 12ms research candidates; no Antares parity
 // claim. Shipping hosted APEX Tune Live continues to use the 40ms HQ path.
 enum class ShifterProfile { HighQuality40ms, Experimental18ms, Experimental12ms };
+// Keep the singer-approved timing as the hosted default until the independent
+// fixed-clock candidate passes a listening review. Select only at prepare().
+enum class StudioControlClock { ApprovedHostChunks, ResearchFixed1ms };
 
 class DspCore final {
 public:
     void prepare(double sampleRate,int maxBlockSize,int numChannels,
-                 ShifterProfile profile=ShifterProfile::HighQuality40ms) {
+                 ShifterProfile profile=ShifterProfile::HighQuality40ms,
+                 StudioControlClock clock=StudioControlClock::ApprovedHostChunks) {
         profile_=profile;
+        fixedClock_=clock==StudioControlClock::ResearchFixed1ms;
         rate_=std::isfinite(sampleRate) && sampleRate>8000.0 ? sampleRate : 48000.0;
         block_=std::max(1,maxBlockSize);
         channels_=std::clamp(numChannels,1,2);
@@ -125,7 +130,17 @@ public:
         // alters vowels and phase for no musical benefit. A smoothed wet gate
         // removes this coloration at tiny shifts without clicky hard cuts.
         for(int offset=0;offset<n;) {
-            if(controlLeft_==0) {
+            const int legacyCount=std::min(block_,n-offset);
+            if(!fixedClock_) {
+                // Exact approved host-chunk timing and arithmetic.
+                const float response=static_cast<float>(1.0-std::exp(-legacyCount/(rate_*retuneMs*0.001)));
+                smooth_+=(target_-smooth_)*response;
+                stretch_.setTransposeFactor(std::pow(2.0f,smooth_/12.0f));
+                needsPitchWork_=(std::abs(target_)>0.010f ||
+                                 std::abs(smooth_)>0.010f) ?1.0f:0.0f;
+                stretch_.setFormantFactor(1.0f,user.preserveFormants);
+                stretch_.setFormantBase(frequency_>0 ? frequency_/static_cast<float>(rate_) : 0.0f);
+            } else if(controlLeft_==0) {
                 controlLeft_=controlHop;
                 const float response=static_cast<float>(-std::expm1(
                     -controlHop/(rate_*retuneMs*0.001)));
@@ -138,7 +153,7 @@ public:
                 stretch_.setFormantFactor(1.0f,user.preserveFormants);
                 stretch_.setFormantBase(frequency_>0 ? frequency_/static_cast<float>(rate_) : 0.0f);
             }
-            const int count=std::min({block_,n-offset,controlLeft_});
+            const int count=fixedClock_?std::min(legacyCount,controlLeft_):legacyCount;
             // Nonfinite samples can poison FFT state for multiple seconds.
             // Repair at the insert boundary; no allocations or logging on RT.
             for(int ch=0;ch<channels;++ch)
@@ -194,7 +209,7 @@ public:
                 }
                 delayPosition_=nextDelayPosition;
             }
-            controlLeft_-=count;
+            if(fixedClock_) controlLeft_-=count;
             offset+=count;
         }
     }
@@ -211,6 +226,7 @@ private:
     float envelopeAlpha_=0.0f,wetStep_=0.0f,neutralStep_=0.0f;
     int block_=0,channels_=2,latency_=0,delayPosition_=0,delayLength_=1,controlLeft_=0;
     ShifterProfile profile_=ShifterProfile::HighQuality40ms;
+    bool fixedClock_=false;
 };
 
 }} // namespace APEX::TuneLive
