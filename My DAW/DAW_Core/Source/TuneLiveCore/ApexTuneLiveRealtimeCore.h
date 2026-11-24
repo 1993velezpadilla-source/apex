@@ -27,6 +27,7 @@ public:
         inputLevelStep_ = 1.0 / (0.004 * rate_ + 1.0);
         wetStep_ = 1.0 / (0.0015 * rate_ + 1.0);
         formantStep_ = 1.0 / (0.003 * rate_ + 1.0);
+        partialWeightStep_ = 1.0 / (0.0015 * rate_ + 1.0);
         agreementStep_ = 1.0 / (0.00030 * rate_ + 1.0);
         // Short detector gaps must fade correction but preserve the fitted
         // waveform. An immediate bank tear-down on every missed 1-ms hop
@@ -289,7 +290,7 @@ private:
     };
     struct Bank {
         std::array<std::array<Partial, kPartials>, 2> partials{};
-        std::array<double, kPartials> gain{}, targetGain{}, weight{};
+        std::array<double, kPartials> gain{}, targetGain{}, weight{}, targetWeight{};
         Phase source, destination, sourceStep, destinationStep;
         Sample residualPower{}, correctionGain{1.0, 1.0};
         double hz = 0.0, ratio = 1.0, learningStep = 0.0;
@@ -438,9 +439,14 @@ private:
             // with the wideband consonant residual or approach Nyquist.
             const double taper = std::clamp((safeBand - (h + 1) * bank_.hz) / (0.34 * safeBand),
                                            0.0, 1.0);
-            bank_.weight[bin] = taper * taper * (3.0 - 2.0 * taper);
+            bank_.targetWeight[bin] = taper * taper * (3.0 - 2.0 * taper);
             if (h >= priorSize)
+            {
                 bank_.gain[bin] = 1.0;
+                // The initial fitted cycle already has a wet attack fade.
+                // Partials added during a glide must fade in independently.
+                bank_.weight[bin] = onset ? bank_.targetWeight[bin] : 0.0;
+            }
         }
         if (!researchPhaseSlew_ || onset)
         {
@@ -568,7 +574,9 @@ private:
             basis[bin] = source;
             auto& gain = bank_.gain[bin];
             gain += formantStep_ * (bank_.targetGain[bin] - gain);
-            const double weight = bank_.weight[bin];
+            auto& harmonicWeight = bank_.weight[bin];
+            harmonicWeight += partialWeightStep_ * (bank_.targetWeight[bin] - harmonicWeight);
+            const double weight = harmonicWeight;
             for (int c = 0; c < Channels; ++c)
             {
                 const auto channel = static_cast<std::size_t>(c);
@@ -683,7 +691,7 @@ private:
     Bank bank_{}, outgoing_{};
     Sample envelope_{}, lastCorrection_{}, lastDry_{}, releaseOffset_{};
     double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
-    double correctionRestoreStep_ = 0.0;
+    double correctionRestoreStep_ = 0.0, partialWeightStep_ = 0.0;
     double phaseSlewStep_ = 0.0, phaseHz_ = 0.0;
     double targetShift_ = 0.0, shift_ = 0.0, confidence_ = 0.0, wet_ = 0.0;
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
