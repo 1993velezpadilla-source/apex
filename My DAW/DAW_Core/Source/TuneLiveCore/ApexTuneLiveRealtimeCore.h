@@ -48,12 +48,15 @@ public:
         retune_ = -1.0f;
         controlLeft_ = decayLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
         frequency_ = 0.0f;
+        waveformReleaseCount_ = 0;
     }
 
     static constexpr int latencySamples() noexcept { return 0; }
     float frequencyHz() const noexcept { return frequency_; }
     double correctionMix() const noexcept { return wet_; }
     double appliedShiftSemitones() const noexcept { return shift_; }
+    // Read after processing; diagnostic only, no cross-thread contract.
+    unsigned waveformReleaseCount() const noexcept { return waveformReleaseCount_; }
 
     void process(float* const* data, int channels, int samples, const DspSettings& settings) noexcept
     {
@@ -134,9 +137,29 @@ public:
             if (mix == 0.0 && wet_ == 0.0)
                 decayLeft_ = 0;
 
+            // Complementary smoothstep handoff: the released bank already
+            // starts at lastCorrection_. Adding the new bank at full gain
+            // would introduce a correction-only step on the first sample.
+            double incomingWeight = 1.0;
+            if (decayLeft_ > 0 && bank_.size > 0)
+            {
+                const double t = static_cast<double>(decayLeft_) / decaySamples_;
+                incomingWeight = 1.0 - t * t * (3.0 - 2.0 * t);
+            }
             Sample delta = renderOutgoing(mix);
             if (bank_.size > 0)
-                renderAndLearn(input, delta);
+            {
+                if (incomingWeight < 1.0)
+                {
+                    Sample incoming{};
+                    renderAndLearn(input, incoming);
+                    for (int c = 0; c < channels_; ++c)
+                        delta[static_cast<std::size_t>(c)] +=
+                            incomingWeight * incoming[static_cast<std::size_t>(c)];
+                }
+                else
+                    renderAndLearn(input, delta);
+            }
             for (int c = 0; c < channels_; ++c)
             {
                 const auto channel = static_cast<std::size_t>(c);
@@ -412,6 +435,7 @@ private:
 
     void releaseWaveform() noexcept
     {
+        ++waveformReleaseCount_;
         outgoing_ = bank_;
         bank_ = {};
         decayLeft_ = decaySamples_;
@@ -470,6 +494,7 @@ private:
     int channels_ = 1, decaySamples_ = 2, decayLeft_ = 0, controlLeft_ = 0;
     int neutralHoldSamples_ = 0, neutralLeft_ = 0;
     int fastRetuneSamples_ = 0, fastRetuneLeft_ = 0;
+    unsigned waveformReleaseCount_ = 0;
     bool prepared_ = false;
 };
 
