@@ -241,9 +241,16 @@ public:
                 // singers. Keep the tight guard during a known model fade,
                 // and reserve the separate output-slope guard for rare gross
                 // correction-only discontinuities.
-                const double maxCorrectionStep =
-                    researchPhaseSlew_ && (weakModel || outgoingTransition)
-                        ? 0.034 : 0.18;
+                // The research thresholds were calibrated on 44.1 kHz
+                // voices. At a lower sample rate each sample spans more
+                // time: a normal harmonic has a larger derivative per
+                // sample. Preserve the calibrated thresholds at 44.1 kHz
+                // and above, but do not flatten legitimate low-rate PCM.
+                const double slopeScale = researchPhaseSlew_
+                    ? std::max(1.0, 44100.0 / rate_) : 1.0;
+                const double maxCorrectionStep = slopeScale *
+                    (researchPhaseSlew_ && (weakModel || outgoingTransition)
+                        ? 0.034 : 0.18);
                 double correction = std::clamp(
                     delta[channel], lastCorrection_[channel] - maxCorrectionStep,
                     lastCorrection_[channel] + maxCorrectionStep);
@@ -258,14 +265,14 @@ public:
                     const double drySlope = input[channel] - lastDry_[channel];
                     const double correctionSlope = correction - lastCorrection_[channel];
                     const double requestedOutputSlope = drySlope + correctionSlope;
-                    const double naturalCap = std::max(0.040,
-                        std::abs(drySlope) + 0.010);
+                    const double naturalCap = std::max(0.040 * slopeScale,
+                        std::abs(drySlope) + 0.010 * slopeScale);
                     // At strong high-register vowels a 0.04-FS correction
                     // impulse can add to the perfectly natural dry slope.
                     // Detect the *excess over dry*, not a blanket high-pass
                     // that clips harmonic-rich singing every sample.
-                    const bool anomaly = std::abs(correctionSlope) > 0.040 &&
-                        std::abs(requestedOutputSlope) > naturalCap + 0.008;
+                    const bool anomaly = std::abs(correctionSlope) > 0.040 * slopeScale &&
+                        std::abs(requestedOutputSlope) > naturalCap + 0.008 * slopeScale;
                     if (anomaly)
                         correction += std::clamp(requestedOutputSlope,
                             -naturalCap, naturalCap) - requestedOutputSlope;
