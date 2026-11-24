@@ -203,6 +203,8 @@ bool testNoteTransitions() {
     std::vector<float> dry(length);
     double worstPeakRatio = 0.0;
     float worstCorrectionStep = 0.0f;
+    double worstHandoffStep = 0.0;
+    unsigned handoffs = 0;
     for (const auto& notes : pairs) {
         for (const double offset : {-27.0, 30.0}) {
             const double sourceShift = std::exp2(offset / 1200.0);
@@ -221,7 +223,22 @@ bool testNoteTransitions() {
                 }
                 auto wet = dry;
                 engine.reset();
-                run(engine, wet, settings, 119);
+                // Observe the exact release sample, not a block boundary.
+                // The first outgoing sample is anchored at the previous
+                // correction, so the incoming bank must have zero weight.
+                double previousCorrection = 0.0;
+                for (std::size_t sample = 0; sample < wet.size(); ++sample) {
+                    const auto releases = engine.waveformReleaseCount();
+                    float* audio[]{wet.data() + sample};
+                    engine.process(audio, 1, 1, settings);
+                    const double correction = static_cast<double>(wet[sample]) - dry[sample];
+                    if (engine.waveformReleaseCount() != releases) {
+                        ++handoffs;
+                        worstHandoffStep = std::max(worstHandoffStep,
+                            std::abs(correction - previousCorrection));
+                    }
+                    previousCorrection = correction;
+                }
                 for (auto i = static_cast<std::size_t>(transition); i < wet.size(); ++i) {
                     outputPeak = std::max(outputPeak, std::abs(static_cast<double>(wet[i])));
                     const float step = (wet[i] - dry[i]) - (wet[i - 1] - dry[i - 1]);
@@ -233,7 +250,10 @@ bool testNoteTransitions() {
     }
     std::cout << "note_transition_cases=96 max_peak_ratio=" << worstPeakRatio
               << " max_correction_sample_step=" << worstCorrectionStep << '\n';
-    return worstPeakRatio < 1.55 && worstCorrectionStep < 0.17f;
+    std::cout << "note_bank_handoffs=" << handoffs
+              << " max_first_sample_handoff_step=" << worstHandoffStep << '\n';
+    return worstPeakRatio < 1.55 && worstCorrectionStep < 0.17f &&
+           handoffs > 0 && worstHandoffStep < 2.0e-6;
 }
 
 bool testTimelineAndReset() {
