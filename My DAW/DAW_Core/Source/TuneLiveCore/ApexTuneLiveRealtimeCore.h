@@ -83,12 +83,7 @@ public:
     void setResearchPhaseSlew(bool enabled) noexcept
     {
         requestedResearchPhaseSlew_ = enabled;
-        if (bank_.size == 0 && decayLeft_ <= 0 && researchPhaseSlew_ != enabled)
-        {
-            researchPhaseSlew_ = enabled;
-            phaseHz_ = 0.0;
-            phaseLeft_ = 0;
-        }
+        applyPendingResearchMode();
     }
     bool researchPhaseSlewEnabledForTest() const noexcept { return researchPhaseSlew_; }
 
@@ -132,6 +127,10 @@ public:
 
         for (int i = 0; i < samples; ++i)
         {
+            // Commit the pending mode on the exact first idle sample,
+            // not on the next host callback (whose size may vary).
+            if (requestedResearchPhaseSlew_ != researchPhaseSlew_)
+                applyPendingResearchMode();
             Sample input{clean(data[0][i]), stereo ? clean(data[1][i]) : 0.0};
             for (int c = 0; c < channels_; ++c)
             {
@@ -179,8 +178,8 @@ public:
             wet_ += wetStep * (wetTarget - wet_);
             if (wet_ < 1.0e-10)
                 wet_ = 0.0;
-            if (mix == 0.0 && wet_ == 0.0)
-                decayLeft_ = 0;
+            // Finish the short outgoing fade even after bypass: cutting
+            // it here would discard the previous sample's correction.
 
             // The old and freshly detected note must be *complementary*
             // during a bank handoff. Previously both corrections were at
@@ -194,7 +193,7 @@ public:
                 const double oldWeight = t * t * (3.0 - 2.0 * t);
                 incomingWeight = 1.0 - oldWeight;
             }
-            Sample delta = renderOutgoing(mix);
+            Sample delta = renderOutgoing();
             if (bank_.size > 0)
             {
                 if (incomingWeight < 1.0)
@@ -296,6 +295,16 @@ private:
         double hz = 0.0, ratio = 1.0, learningStep = 0.0;
         int size = 0;
     };
+
+    void applyPendingResearchMode() noexcept
+    {
+        if (bank_.size != 0 || decayLeft_ > 0 ||
+            requestedResearchPhaseSlew_ == researchPhaseSlew_)
+            return;
+        researchPhaseSlew_ = requestedResearchPhaseSlew_;
+        phaseHz_ = 0.0;
+        phaseLeft_ = 0;
+    }
 
     static double clean(float value) noexcept
     {
@@ -624,16 +633,16 @@ private:
         missingPitchHops_ = postDropoutGuardHops_ = 0;
     }
 
-    Sample renderOutgoing(double mix) noexcept
+    Sample renderOutgoing() noexcept
     {
         if (decayLeft_ <= 0)
             return {};
-        return channels_ == 1 ? renderOutgoingChannels<1>(mix)
-                              : renderOutgoingChannels<2>(mix);
+        return channels_ == 1 ? renderOutgoingChannels<1>()
+                              : renderOutgoingChannels<2>();
     }
 
     template<int Channels>
-    Sample renderOutgoingChannels(double mix) noexcept
+    Sample renderOutgoingChannels() noexcept
     {
         Sample delta{};
         if (decayLeft_ <= 0)
@@ -660,8 +669,7 @@ private:
             if (decayLeft_ == decaySpan_)
                 releaseOffset_[channel] = lastCorrection_[channel] - delta[channel];
             delta[channel] = window * (delta[channel] + window * releaseOffset_[channel]);
-            if (mix == 0.0 && releaseAmount_ == 0.0)
-                delta[channel] = 0.0;
+            // Even a zero wet release can carry a residual continuity offset.
         }
         outgoing_.source = outgoing_.source * outgoing_.sourceStep;
         outgoing_.destination = outgoing_.destination * outgoing_.destinationStep;
