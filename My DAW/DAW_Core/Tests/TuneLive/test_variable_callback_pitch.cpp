@@ -100,8 +100,8 @@ bool testControlClock() {
     }
     auto fixedAudio=dry, variedAudio=dry;
     DspCore fixed,varied;
-    fixed.prepare(sr,128,1);
-    varied.prepare(sr,128,1);
+    fixed.prepare(sr,128,1,ShifterProfile::HighQuality40ms,StudioControlClock::ResearchFixed1ms);
+    varied.prepare(sr,128,1,ShifterProfile::HighQuality40ms,StudioControlClock::ResearchFixed1ms);
     DspSettings settings;
     settings.correction=settings.wet=1.0f;
     settings.humanize=settings.flexTune=0.0f;
