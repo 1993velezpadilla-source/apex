@@ -1,0 +1,529 @@
+name: Tune Live real human voice audition (Vocadito)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/apex-tune-live-real-voice.yml'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/**'
+  push:
+    branches: [feature/apex-tune-live-native-v1, feature/mobile-portrait-tunelive-20261123, feature/windows-arranger-tunelive-20261123]
+    paths:
+      - '.github/workflows/apex-tune-live-real-voice.yml'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/**'
+  workflow_dispatch:
+
+# Large licensed test-audio fetch must not queue obsolete PR heads.
+concurrency:
+  group: real-vocadito-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+# Research-only, no private singer takes, no automatic production promotion.
+permissions:
+  contents: read
+jobs:
+  real-singing-offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Cache fixed public-licensed research audio (checksum keyed)
+        id: audio-cache
+        uses: actions/cache@v4
+        with:
+          path: vocadito.zip
+          key: vocadito-zenodo-5578807-dea40fd18f14d899643c4ba221b33a46-v1
+      - name: Download annotated public-domain-or-open-license human singing dataset
+        if: steps.audio-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Use the documented Zenodo file API as an alternate delivery route.
+          # Both routes must yield the identical pinned archive; never substitute audio.
+          for url in \
+            'https://zenodo.org/records/5578807/files/vocadito.zip?download=1' \
+            'https://zenodo.org/api/records/5578807/files/vocadito.zip/content'; do
+            rm -f vocadito.zip.part
+            if curl --fail --location --silent --show-error --retry 2 --retry-all-errors \
+              --retry-delay 8 --connect-timeout 40 --max-time 300 \
+              "$url" -o vocadito.zip.part && \
+              echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip.part' | md5sum --check -; then
+              mv vocadito.zip.part vocadito.zip
+              break
+            fi
+          done
+          test -s vocadito.zip
+      - name: Verify pinned public-singing archive after cache or download
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip' | md5sum --check -
+          test "$(stat -c '%s' vocadito.zip)" -gt 50000000
+      - name: Choose measurable human intonation fixture without guessing singer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import csv, io, math, os, pathlib, re, statistics, wave, zipfile
+
+          with zipfile.ZipFile('vocadito.zip') as package:
+              all_names = package.namelist()
+              wavs = sorted(p for p in all_names if p.lower().endswith('.wav')
+                            and not p.startswith('__MACOSX/'))
+              if not wavs:
+                  raise RuntimeError('Dataset has no real WAV singing excerpts')
+              f0s = [p for p in all_names if 'f0' in p.lower() and p.lower().endswith('.csv')]
+              candidates = []
+              for wav in wavs:
+                  basename = pathlib.PurePosixPath(wav).stem
+                  label = next((p for p in f0s if basename in pathlib.PurePosixPath(p).stem), None)
+                  deviations = []
+                  if label:
+                      contents = package.read(label).decode('utf-8-sig', errors='replace')
+                      for fields in csv.reader(io.StringIO(contents)):
+                          # Vocadito ground-truth is a frame-level, time/F0 table.
+                          # Never treat a pitch at 25+ cents as proof of bad singing:
+                          # temperament and reference A4 may differ from A440.
+                          try:
+                              vals = [float(x.strip()) for x in fields]
+                          except (ValueError, TypeError):
+                              continue
+                          if len(vals)<2:
+                              continue
+                          f0=vals[1]
+                          if math.isfinite(f0) and 65<=f0<=1300:
+                              midi=69+12*math.log2(f0/440.0)
+                              deviations.append(abs(midi-round(midi))*100.0)
+                  median=statistics.median(deviations) if len(deviations)>60 else -1
+                  candidates.append((median,len(deviations),wav,label))
+              candidates.sort(reverse=True)
+              score,num,wav,label=candidates[0]
+              wav_bytes=package.read(wav)
+              with wave.open(io.BytesIO(wav_bytes),'rb') as source:
+                  nch=source.getnchannels()
+                  width=source.getsampwidth()
+                  rate=source.getframerate()
+                  frames=source.getnframes()
+                  comp=source.getcomptype()
+                  if nch not in (1,2) or width not in (2,3,4) or rate<8000 or rate>96000 or comp!='NONE':
+                      raise RuntimeError('Chosen human WAV format not suitable for APEX offline utility')
+                  count=min(frames,15*rate)
+                  payload=source.readframes(count)
+              with wave.open('vocadito_human_source.wav','wb') as dest:
+                  dest.setnchannels(nch)
+                  dest.setsampwidth(width)
+                  dest.setframerate(rate)
+                  dest.writeframes(payload)
+              description=f"""Source: vocadito: A dataset of solo vocals with f0, note, and lyric Annotations
+          Authors: Rachel M. Bittner, Katherine Pasalo, Juan Jose Bosch,
+                   Gabriel Meseguer-Brocal, David Rubinstein
+          Record: https://zenodo.org/records/5578807
+          License: Creative Commons Attribution 4.0 International
+          License URL: https://creativecommons.org/licenses/by/4.0/
+          Dataset excerpt ZIP entry: {wav}
+          F0 annotation ZIP entry: {label or 'none available'}
+          Selected original annotation frames: {num}
+          Median absolute pitch offset from nearest 12-TET A440 note (cents): {score:.2f}
+          IMPORTANT: This metric is NOT a guarantee that the singer is singing
+          incorrectly or off-key. Expressive intonation, vibrato, and non-A440
+          reference tunings may all contribute to the observed deviation.
+          Transforms: crop first 15 seconds, preserve WAV format, then create
+          dry / production HQ40 / independent causal research 24-bit WAVs.
+          This is an actual voluntary human recording, not a generated voice.
+          This dataset is separate from the Freesound 'Bad Singer' examples.
+          Audio files are not time/level-aligned for perceptual comparison.
+          No claim of Antares equivalence or real-time device latency.
+          """
+              pathlib.Path('VOCADITO_LICENSE_AND_EVIDENCE.txt').write_text(description)
+              print(description)
+          PY
+      - name: Compile actual APEX Tune HQ40 and isolated causal research WAV renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" \
+            -o tune_live_offline_audition
+          ./tune_live_offline_audition --input vocadito_human_source.wav --prefix vocadito_human
+      - name: Measure real voiced-note intonation before and after BOTH APEX engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/tune_live_human_voice_metrics.cpp" \
+            -o tune_live_human_voice_metrics
+          ./tune_live_human_voice_metrics --prefix vocadito_human
+      - name: Produce real-voice 18ms and 12ms shifter research WAVs (NEVER shipping)
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/tune_live_window_profile_audition.cpp" \
+            -o tune_live_window_profiles
+          ./tune_live_window_profiles --input vocadito_human_source.wav --prefix vocadito_human
+      - name: Test two additional independent real singers — lowest and highest annotated register
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "My DAW/DAW_Core/Tests/TuneLive/select_vocadito_voice_registers.py"
+          for register in low high; do
+            ./tune_live_offline_audition --input "vocadito_${register}_source.wav" --prefix "vocadito_${register}"
+            ./tune_live_human_voice_metrics --prefix "vocadito_${register}" --exploratory
+            ./tune_live_window_profiles --input "vocadito_${register}_source.wav" --prefix "vocadito_${register}"
+          done
+          # A low/high singer must not be silently substituted by the pinned
+          # #24 take, nor vanish from artifacts after a successful CI gate.
+          grep -q 'profile=low' VOCADITO_REGISTER_MATRIX_LICENSE.txt
+          grep -q 'profile=high' VOCADITO_REGISTER_MATRIX_LICENSE.txt
+          test -s vocadito_low_PITCH_COMPARISON.txt
+          test -s vocadito_high_PITCH_COMPARISON.txt
+      - name: Compare production Tracking before and after harmonic taper smoothing
+        shell: bash
+        run: |
+          set -euo pipefail
+          CORE='My DAW/DAW_Core/Source/TuneLiveCore'
+          TEST='My DAW/DAW_Core/Tests/TuneLive/Research'
+          BASE=327266ed876a417c019e73ef4ac7f7cf67e1f0aa
+          git fetch --no-tags --depth=1 origin "$BASE"
+          git show "$BASE:$CORE/ApexTuneLiveRealtimeCore.h" > "$CORE/_baseline_tracking_core.h"
+          sed 's@/ApexTuneLiveRealtimeCore.h"@/_baseline_tracking_core.h"@' \
+            "$TEST/tune_live_phase_human_ab.cpp" > "$TEST/_baseline_tracking_ab.cpp"
+          trap 'rm -f "$CORE/_baseline_tracking_core.h" "$TEST/_baseline_tracking_ab.cpp"' EXIT
+          for version in baseline candidate; do
+            src="$TEST/tune_live_phase_human_ab.cpp"
+            if [[ "$version" == baseline ]]; then src="$TEST/_baseline_tracking_ab.cpp"; fi
+            g++ -std=c++17 -O3 -Wall -Wextra -Werror \
+              -isystem 'My DAW/DAW_Core/Source/ThirdParty' \
+              -isystem 'My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch' \
+              "$src" -o "/tmp/tracking-$version"
+            mkdir -p tracking-taper-ab
+            for voice in human low high; do
+              "/tmp/tracking-$version" --input "vocadito_${voice}_source.wav" \
+                --prefix "tracking-taper-ab/$version-$voice" | tee "tracking-taper-ab/$version-$voice.jsonl"
+            done
+          done
+          python3 - <<'PY'
+          import json, pathlib
+          root = pathlib.Path('tracking-taper-ab')
+          results = []
+          for voice in ('human', 'low', 'high'):
+              a,b = [json.loads((root/f'{v}-{voice}.jsonl').read_text().splitlines()[0])
+                     for v in ('baseline','candidate')]
+              assert a['mode']==b['mode']=='original'
+              assert a['frames']==b['frames'] and a['rate']==b['rate']
+              assert a['nonfinite']==b['nonfinite']==0
+              assert .85 <= b['rms']/max(a['rms'],1e-9) <= 1.15
+              assert b['nearest_tet_cents_median'] <= a['nearest_tet_cents_median']+3
+              results.append({'voice':voice,'baseline':a,'candidate':b,
+                  'added_step_delta':b['max_added_step_over_dry']-a['max_added_step_over_dry'],
+                  'likely_event_delta':b['likely_added_click_steps']-a['likely_added_click_steps']})
+          (root/'comparison.json').write_text(json.dumps(results,indent=2))
+          print(json.dumps(results,indent=2))
+          # Do not certify audible clicks solely from PCM derivatives.
+          # Preserve this evidence even if the candidate worsens.
+          assert all(r['added_step_delta']<=.01 and
+                     r['candidate']['likely_added_click_steps']<=
+                     r['baseline']['likely_added_click_steps']*1.10+3
+                     for r in results), 'Tracking taper candidate worsened real singer discontinuity proxy'
+          PY
+      - name: Upload Tracking baseline vs candidate voice evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracking-taper-real-voice-ab
+          path: tracking-taper-ab/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Render separate predictive LIVE (early-onset) real singer A-B — research only
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/render_human_harmonic_live_research.cpp" \
+            -o tune_live_harmonic_human_renderer
+          for singer in human low high; do
+            ./tune_live_harmonic_human_renderer --prefix "vocadito_${singer}"
+            test -s "vocadito_${singer}_harmonic_live_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_residual_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_fast_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_high_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_ultra_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_ultra_4hop_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_ultra_consensus_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_halfcycle_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_ultra_smooth_research.wav"
+            test -s "vocadito_${singer}_HARMONIC_LIVE_RESEARCH.txt"
+          done
+      - name: Reject gross sibilance-energy loss in causal residual LIVE across 3 real singers
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_harmonic_human_residual_bands.cpp" \
+            -o tune_live_harmonic_sibilance_gate
+          for singer in human low high; do
+            ./tune_live_harmonic_sibilance_gate --prefix "vocadito_${singer}" | tee "vocadito_${singer}_HARMONIC_LIVE_BANDS_REPORT.txt"
+          done
+      - name: Independent 13-band voiced-singer spectrum comparison (proxy only; NOT validated formants)
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_log_spectrum_formant_proxy.cpp" \
+            -o tune_live_log_spectrum_human
+          for singer in human low high; do
+            ./tune_live_log_spectrum_human --prefix "vocadito_${singer}"
+            test -s "vocadito_${singer}_LOG_SPECTRAL_ENVELOPE_DIAGNOSTIC.txt"
+          done
+      - name: Reject concentrated ultra-predictor transient glitches on 3 licensed singers
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_ultra_change_hotspots.cpp" \
+            -o tune_live_human_transient_hotspots
+          for singer in human low high; do
+            ./tune_live_human_transient_hotspots --prefix "vocadito_${singer}"
+            test -s "vocadito_${singer}_ULTRA_LOCAL_TRANSIENT_AUDIT.txt"
+          done
+      - name: Audit ultra research optional dry-leap reset on 3 real voices (no quality presumption)
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_ultra_dry_reset_experiment.cpp" \
+            -o tune_live_human_dry_reset_experiment
+          for singer in human low high; do
+            ./tune_live_human_dry_reset_experiment --prefix "vocadito_${singer}"
+            test -s "vocadito_${singer}_ULTRA_DRY_RESET_RESEARCH.txt"
+          done
+      - name: Prepare blind level-matched WAV A-B/C at highest measured singer transition hotspot
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This stage does not auto-pass any subjective quality gate.
+          # If a >5 dB localized spectral change exists, create sample-synchronous,
+          # PCM24 level-matched A/B/C of the previous, ultra, and reset variants.
+          python3 "My DAW/DAW_Core/Tests/TuneLive/create_human_ultra_focus_ab.py" \
+            --prefix vocadito_high --out ULTRA_VOCAL_FOCUS_AB
+          test -s ULTRA_VOCAL_FOCUS_AB/LISTEN_FIRST.txt || \
+            test -s ULTRA_VOCAL_FOCUS_AB/NO_LOCALIZED_AB_NEEDED.txt
+      - name: Measure independent sustained-note F0 on real HQ40 vs fast LIVE research singers
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_human_sustained_pitch.cpp" \
+            -o causal_human_pitch_diagnostics
+          for singer in human low high; do
+            ./causal_human_pitch_diagnostics --prefix "vocadito_${singer}"
+            test -s "vocadito_${singer}_FAST_HUMAN_F0_COMPARISON.txt"
+          done
+      - name: Research-only real singer A-B downshift compensation with bit-exact HQ40 identity gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Code-generated twin lives in this ephemeral runner workspace only.
+          # Never compile it into JUCE or promote automatically to APEX.
+          python3 "My DAW/DAW_Core/Tests/TuneLive/generate_research_downshift_variant.py"
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/render_human_research_downshift.cpp" \
+            -o tune_live_research_human_ab
+          for label in human low high; do
+            ./tune_live_research_human_ab --prefix "vocadito_${label}"
+            test -s "vocadito_${label}_research_compensated.wav"
+            test -s "vocadito_${label}_RESEARCH_COMPENSATION_REPORT.txt"
+          done
+          ! grep -ql 'FAILED' vocadito_*_RESEARCH_COMPENSATION_REPORT.txt
+      - name: Audit real singer high-frequency-rich articulation and dynamics with exact PDC alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_articulation_metrics.cpp" \
+            -o tune_live_human_articulation
+          for label in human low high; do
+            ./tune_live_human_articulation --prefix "vocadito_${label}"
+            test -s "vocadito_${label}_ARTICULATION_SPECTRAL_REPORT.txt"
+          done
+      - name: Investigate high-register octave flags with PDC-aligned actual audio spectra
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_octave_spectral_audit.cpp" \
+            -o human_octave_spectral_audit
+          ./human_octave_spectral_audit --prefix vocadito_high | tee HUMAN_HIGH_REGISTER_SPECTRAL_OCTAVE_AUDIT.txt
+      - name: Validate real human voice outputs and write objective render report
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import math, pathlib, struct, wave
+          paths=['vocadito_human_dry.wav','vocadito_human_hq40.wav',
+                 'vocadito_human_causal_research.wav']
+          metrics=[]
+          duration=None
+          for name in paths:
+              with wave.open(name,'rb') as wav:
+                  if wav.getsampwidth()!=3:
+                      raise RuntimeError(name+': output not PCM24')
+                  n=wav.getnframes()
+                  rate=wav.getframerate()
+                  channels=wav.getnchannels()
+                  sample=wav.readframes(n)
+                  if duration is None:
+                      duration=n/rate
+                  if abs(duration-n/rate)>1.0e-9:
+                      raise RuntimeError('Output lengths differ')
+                  if n<rate or channels not in (1,2):
+                      raise RuntimeError('Not enough nonempty voice samples')
+                  peak=0.0
+                  power=0.0
+                  for i in range(0,len(sample),3):
+                      value=int.from_bytes(sample[i:i+3],byteorder='little',signed=True)
+                      s=value/8388608.0
+                      peak=max(peak,abs(s))
+                      power+=s*s
+                  rms=math.sqrt(power/(n*channels))
+                  if not all(math.isfinite(x) for x in (peak,rms)) or peak<1e-5:
+                      raise RuntimeError('Output is invalid or unexpectedly silent')
+                  metrics.append((name,n,rate,peak,rms))
+          report=['APEX TUNE LIVE — REAL HUMAN SINGING AUDITION / SIGNAL LEVELS',
+                  'WARNING: this is a real audio render, not a perceptual tuning quality proof.',
+                  'Audio track selection source and rights: VOCADITO_LICENSE_AND_EVIDENCE.txt',
+                  'The HQ40 path is the production DspCore; causal is research-only.',
+                  'Do NOT infer fixed PDC or mic-to-ear delay from file length.',
+                  'Time-align, then volume-match before comparing.']
+          report += [f'{name} frames={n} sr={rate} peak={peak:.6f} rms={rms:.6f}'
+                     for name,n,rate,peak,rms in metrics]
+          pathlib.Path('REAL_HUMAN_RENDER_REPORT.txt').write_text('\n'.join(report)+'\n')
+          print('\n'.join(report))
+          PY
+      - name: Publish public licensed human vocal APEX Tune A-B audio
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-tune-real-vocadito-human-vocal-ab
+          path: |
+            vocadito_human_source.wav
+            vocadito_human_dry.wav
+            vocadito_human_hq40.wav
+            vocadito_human_causal_research.wav
+            vocadito_human_harmonic_live_research.wav
+            vocadito_human_harmonic_live_residual_research.wav
+            vocadito_human_harmonic_live_fast_research.wav
+            vocadito_human_harmonic_live_high_research.wav
+            vocadito_human_harmonic_live_ultra_research.wav
+            vocadito_human_harmonic_live_ultra_4hop_research.wav
+            vocadito_human_harmonic_live_ultra_consensus_research.wav
+            vocadito_human_harmonic_live_halfcycle_research.wav
+            vocadito_human_harmonic_live_ultra_smooth_research.wav
+            vocadito_human_HARMONIC_LIVE_RESEARCH.txt
+            vocadito_low_harmonic_live_research.wav
+            vocadito_low_harmonic_live_residual_research.wav
+            vocadito_low_harmonic_live_fast_research.wav
+            vocadito_low_harmonic_live_high_research.wav
+            vocadito_low_harmonic_live_ultra_research.wav
+            vocadito_low_harmonic_live_ultra_4hop_research.wav
+            vocadito_low_harmonic_live_ultra_consensus_research.wav
+            vocadito_low_harmonic_live_halfcycle_research.wav
+            vocadito_low_harmonic_live_ultra_smooth_research.wav
+            vocadito_low_HARMONIC_LIVE_RESEARCH.txt
+            vocadito_high_harmonic_live_research.wav
+            vocadito_high_harmonic_live_residual_research.wav
+            vocadito_high_harmonic_live_fast_research.wav
+            vocadito_high_harmonic_live_high_research.wav
+            vocadito_high_harmonic_live_ultra_research.wav
+            vocadito_high_harmonic_live_ultra_4hop_research.wav
+            vocadito_high_harmonic_live_ultra_consensus_research.wav
+            vocadito_high_harmonic_live_halfcycle_research.wav
+            vocadito_high_harmonic_live_ultra_smooth_research.wav
+            vocadito_high_HARMONIC_LIVE_RESEARCH.txt
+            vocadito_human_HARMONIC_LIVE_BANDS_REPORT.txt
+            vocadito_low_HARMONIC_LIVE_BANDS_REPORT.txt
+            vocadito_high_HARMONIC_LIVE_BANDS_REPORT.txt
+            vocadito_human_FAST_HUMAN_F0_COMPARISON.txt
+            vocadito_low_FAST_HUMAN_F0_COMPARISON.txt
+            vocadito_high_FAST_HUMAN_F0_COMPARISON.txt
+            vocadito_human_LOG_SPECTRAL_ENVELOPE_DIAGNOSTIC.txt
+            vocadito_low_LOG_SPECTRAL_ENVELOPE_DIAGNOSTIC.txt
+            vocadito_high_LOG_SPECTRAL_ENVELOPE_DIAGNOSTIC.txt
+            vocadito_human_ULTRA_LOCAL_TRANSIENT_AUDIT.txt
+            vocadito_low_ULTRA_LOCAL_TRANSIENT_AUDIT.txt
+            vocadito_high_ULTRA_LOCAL_TRANSIENT_AUDIT.txt
+            vocadito_human_ULTRA_DRY_RESET_RESEARCH.txt
+            vocadito_low_ULTRA_DRY_RESET_RESEARCH.txt
+            vocadito_high_ULTRA_DRY_RESET_RESEARCH.txt
+            vocadito_human_research18.wav
+            vocadito_human_research12.wav
+            VOCADITO_LICENSE_AND_EVIDENCE.txt
+            REAL_HUMAN_RENDER_REPORT.txt
+            REAL_HUMAN_PITCH_COMPARISON.txt
+            vocadito_low_source.wav
+            vocadito_low_dry.wav
+            vocadito_low_hq40.wav
+            vocadito_low_causal_research.wav
+            vocadito_low_research18.wav
+            vocadito_low_research12.wav
+            vocadito_low_PITCH_COMPARISON.txt
+            vocadito_high_source.wav
+            vocadito_high_dry.wav
+            vocadito_high_hq40.wav
+            vocadito_high_causal_research.wav
+            vocadito_high_research18.wav
+            vocadito_high_research12.wav
+            vocadito_high_PITCH_COMPARISON.txt
+            ULTRA_VOCAL_FOCUS_AB/
+            VOCADITO_REGISTER_MATRIX_LICENSE.txt
+            HUMAN_HIGH_REGISTER_SPECTRAL_OCTAVE_AUDIT.txt
+            vocadito_human_research_compensated.wav
+            vocadito_low_research_compensated.wav
+            vocadito_high_research_compensated.wav
+            vocadito_human_RESEARCH_COMPENSATION_REPORT.txt
+            vocadito_low_RESEARCH_COMPENSATION_REPORT.txt
+            vocadito_high_RESEARCH_COMPENSATION_REPORT.txt
+            vocadito_human_ARTICULATION_SPECTRAL_REPORT.txt
+            vocadito_low_ARTICULATION_SPECTRAL_REPORT.txt
+            vocadito_high_ARTICULATION_SPECTRAL_REPORT.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Preserve singer-approved HQ40 wet audio (bit-exact PCM24 golden)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A hard audible-output preservation gate complements cents/pitch
+          # gates: a regression can damage formants while keeping pitch true.
+          # SHA pinned to the 13 Oct 2026 first singer test, independently
+          # reverified on later CPU-only builds. Deliberate sound changes
+          # require a fresh listening review before updating this hash.
+          printf '%s  %s\n' \
+            '1d076f62fd68adc80626c16bb4aa28139ca4d9baaed212860d4e92735470a72f' \
+            'vocadito_human_hq40.wav' | sha256sum --check -
+          echo 'HUMAN_HQ40_BIT_EXACT_GOLDEN_PASS'

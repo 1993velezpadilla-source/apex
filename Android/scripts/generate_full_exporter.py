@@ -39,9 +39,13 @@ def main() -> int:
                     and not args.benchmark_x86)
     frame_cache_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-frame-cache"
                            and not args.benchmark_x86)
+    tune_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-tunelive-20261123"
+                    and not args.benchmark_x86)
     # Compare OpenGL in the emulator while the device preview uses the measured Canvas path.
     gpu_arranger = args.benchmark_x86
-    if frame_cache_preview:
+    if tune_preview:
+        name, app_id = "APEX Mobile Tune Preview", "com.xziel.apex.tunelivepreview"
+    elif frame_cache_preview:
         name, app_id = "APEX Mobile 9.10.0", "com.xziel.apex.framecache"
     elif zoom_preview:
         name, app_id = "APEX Zoom Rewrite 7.1", "com.xziel.apex.zoomrewrite"

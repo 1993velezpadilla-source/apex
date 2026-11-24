@@ -1,0 +1,178 @@
+name: APEX Tune Live independent engine comparison
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/mobile-portrait-tunelive-20261123]
+    paths:
+      - '.github/workflows/apex-tunelive-engine-ab.yml'
+      - 'My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_engine_ab.cpp'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/ApexTuneLiveRealtimeCore.h'
+      - 'My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_phase_human_ab.cpp'
+permissions:
+  contents: read
+jobs:
+  ab-reference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Fetch pinned reference into CI temp directory, never into APEX
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/flayr"
+          git -C "$RUNNER_TEMP/flayr" init
+          git -C "$RUNNER_TEMP/flayr" fetch --depth 1 https://github.com/FlayrLabs/flayr-tune.git 4bd2454177888b7566fb4ce667ba078662d9cd25
+          git -C "$RUNNER_TEMP/flayr" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/flayr" rev-parse HEAD)" = "4bd2454177888b7566fb4ce667ba078662d9cd25"
+          grep -q 'GNU AFFERO GENERAL PUBLIC LICENSE' "$RUNNER_TEMP/flayr/LICENSE"
+      - name: Build isolated APEX and Flayr research executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_engine_ab.cpp'
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem 'My DAW/DAW_Core/Source/ThirdParty' \
+            -isystem 'My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch' \
+            "$SRC" -o /tmp/apex_engine_ab
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -DAPEX_FLAYR \
+            -I "$RUNNER_TEMP/flayr/Source" "$SRC" -o /tmp/flayr_engine_ab
+      - name: Render A/B WAV and CPU PCM telemetry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tune-engine-ab/apex tune-engine-ab/flayr
+          /tmp/apex_engine_ab tune-engine-ab/apex | tee tune-engine-ab/apex.jsonl
+          /tmp/flayr_engine_ab tune-engine-ab/flayr | tee tune-engine-ab/flayr.jsonl
+          python3 - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('tune-engine-ab')
+          results=[json.loads(line) for name in ('apex','flayr')
+                   for line in (root/(name+'.jsonl')).read_text().splitlines()]
+          assert len(results)==5,results
+          assert all(r['frames']==192000 and r['nonfinite']==0 for r in results)
+          (root/'comparison.json').write_text(json.dumps({
+              'comparison':'Synthetic PCM fixture, not Android device xrun evidence',
+              'reference_sha':'4bd2454177888b7566fb4ce667ba078662d9cd25','runs':results},indent=2))
+          print('Independent A/B results validated, four modes')
+          PY
+      - name: Locate actual click-like PCM discontinuity hotspots per mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,struct
+          root=pathlib.Path('tune-engine-ab')
+          names=['apex/apex_tracking.wav','apex/apex_tracking_phase_slew_research.wav',
+                 'apex/apex_studio.wav','flayr/flayr_live.wav','flayr/flayr_studio.wav']
+          def wav(path):
+              data=path.read_bytes()
+              assert data[:4]==b'RIFF' and data[8:12]==b'WAVE'
+              index=data.find(b'data')
+              assert index>=0 and struct.unpack_from('<H',data,20)[0]==3
+              n=struct.unpack_from('<I',data,index+4)[0]//4
+              return struct.unpack_from('<'+str(n)+'f',data,index+8)
+          dry=wav(root/'apex/input.wav')
+          for name in names:
+              audio=wav(root/name)
+              assert len(audio)==len(dry)
+              differences=[abs(audio[i]-audio[i-1]) for i in range(1,len(audio))]
+              ordered=sorted(range(1,len(audio)),key=lambda i:differences[i-1],reverse=True)
+              selected=[]
+              for i in ordered:
+                  if all(abs(i-j)>240 for j in selected):
+                      selected.append(i)
+                  if len(selected)==7:break
+              print('PCM_HOTSPOTS',name)
+              for i in selected:
+                  print('  sample=',i,'time_s=',round(i/48000,6),
+                        'step=',round(differences[i-1],6),
+                        'dry_step=',round(abs(dry[i]-dry[i-1]),6),
+                        'correction_step=',round(abs(
+                            (audio[i]-dry[i])-(audio[i-1]-dry[i-1])),6))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: APEX-TuneLive-Engine-AB-WAV-and-Metrics
+          path: tune-engine-ab
+          if-no-files-found: error
+          retention-days: 14
+  real-singers:
+    name: Phase research on two licensed human voices
+    needs: ab-reference
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Cache pinned Vocadito dataset, CC BY 4.0
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: vocadito.zip
+          key: vocadito-zenodo-5578807-dea40fd18f14d899643c4ba221b33a46-v1
+      - name: Download independent licensed singers
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
+            --connect-timeout 40 --max-time 480 \
+            'https://zenodo.org/records/5578807/files/vocadito.zip?download=1' \
+            -o vocadito.zip
+      - name: Verify archive and select two annotated voice registers
+        run: |
+          set -euo pipefail
+          echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip' | md5sum --check -
+          python3 'My DAW/DAW_Core/Tests/TuneLive/select_vocadito_voice_registers.py'
+      - name: Compile original vs experimental Tracking human WAV audition
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem 'My DAW/DAW_Core/Source/ThirdParty' \
+            -isystem 'My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch' \
+            'My DAW/DAW_Core/Tests/TuneLive/Research/tune_live_phase_human_ab.cpp' \
+            -o /tmp/apex_phase_human
+      - name: Render voice and pitch/peak/callback report for both singers
+        run: |
+          set -euo pipefail
+          mkdir -p human-phase-ab
+          for voice in low high; do
+            /tmp/apex_phase_human --input "vocadito_$voice"_source.wav \
+              --prefix "human-phase-ab/$voice" | tee "human-phase-ab/$voice"-metrics.jsonl
+            test "$(wc -l < "human-phase-ab/$voice"-metrics.jsonl)" -eq 2
+          done
+          cp VOCADITO_REGISTER_MATRIX_LICENSE.txt human-phase-ab/ATTRIBUTION.txt
+          python3 - <<'PY'
+          import json, pathlib
+          root=pathlib.Path('human-phase-ab')
+          for voice in ('low','high'):
+              rows=[json.loads(line) for line in
+                  (root/(voice+'-metrics.jsonl')).read_text().splitlines()]
+              assert len(rows)==2,(voice,rows)
+              before,after=rows
+              assert before['mode']=='original' and after['mode']=='phase_research'
+              assert before['nonfinite']==after['nonfinite']==0
+              assert after['max_added_step_over_dry'] <= before['max_added_step_over_dry'] * .70, (voice,rows)
+              # Gross output sample slopes can come directly from licensed
+              # singer harmonics/consonants. Require no significant added
+              # broadband excursion beyond the exact source's max slope.
+              # The stricter guard is on *correction-added* steps.
+              assert after['max_step'] <= after['dry_max_step'] + .030, (voice,rows)
+              # Prevent a trivial 'mute the wet engine' improvement.
+              assert .85 <= after['rms']/max(before['rms'],1e-9) <= 1.15, (voice,rows)
+              assert after['likely_added_click_steps'] <= before['likely_added_click_steps']*.80, (voice,rows)
+              assert after['nearest_tet_cents_median'] <= before['nearest_tet_cents_median']+3.0, (voice,rows)
+              print('REAL_SINGER_RESEARCH_GUARD_PASS',voice,
+                    'added_step',before['max_added_step_over_dry'],'->',after['max_added_step_over_dry'],
+                    'worst_step',before['max_step'],'->',after['max_step'],
+                    'candidate_click_events',before['likely_added_click_steps'],'->',
+                    after['likely_added_click_steps'])
+          PY
+      - name: Upload only CC BY licensed audition outputs and measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-TuneLive-Experimental-RealSinger-AB
+          path: human-phase-ab
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,111 @@
+name: APEX Tune Live REA shipped APK binary audit
+
+# REA is an investigation tool, not an audio plugin. Analyse the two shipped
+# ARM64 release artifacts without loading JNI libraries or executing the APK.
+# This gives evidence for packaging/build drift; it cannot observe DSP xruns.
+on:
+  push:
+    branches: [feature/mobile-portrait-tunelive-20261123]
+    paths: [.github/workflows/apex-tunelive-rea-apk-audit.yml]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  rea-apk-binary-diff:
+    name: REA static compare of prior vs current Tune Live ARM64 APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Download original released Tune Live ARM64 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: APEX-Mobile-TuneLive-ARM64
+          run-id: 45183002376
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/apex-before
+
+      - name: Download patched released Tune Live ARM64 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: APEX-Mobile-TuneLive-ARM64
+          run-id: 45195550388
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/apex-after
+
+      - name: Install pinned REA CLI in isolated temporary directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          # REA 6.10.1 requires current Node 22.23.4+ / 24.22.1+.
+          # Install no global MCP server and no development agent hooks.
+          echo "REA is a read-only shipped-artifact audit, not a DSP insert."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+
+      - name: Install REA 6.10.1 without npm lifecycle scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/rea-tool" --no-save --ignore-scripts --no-audit --no-fund rea-agents@6.10.1
+          "$RUNNER_TEMP/rea-tool/node_modules/.bin/rea" --version
+
+      - name: Read-only REA APK inventory, signing and ARM64 ELF evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          REA="$RUNNER_TEMP/rea-tool/node_modules/.bin/rea"
+          OUT="$RUNNER_TEMP/rea-apex-report"
+          mkdir -p "$OUT"
+          for revision in before after; do
+            DIR="$RUNNER_TEMP/apex-$revision"
+            APK="$(find "$DIR" -maxdepth 3 -type f -name '*.apk' -print -quit)"
+            test -s "$APK" || { echo "::error::No APK inside downloaded $revision artifact"; exit 1; }
+            sha256sum "$APK" > "$OUT/$revision-apk.sha256"
+            unzip -Z1 "$APK" > "$OUT/$revision-apk-members.txt"
+            # REA inspects the real released package; native execution is NOT performed.
+            "$REA" inspect-artifact "$APK" --detail summary --evidence_output "$OUT/$revision-rea-evidence.json" --json > "$OUT/$revision-rea-summary.json"
+            "$REA" inspect-apk-signature "$APK" --json > "$OUT/$revision-apk-signature.json"
+            mkdir -p "$OUT/$revision-elf"
+            while IFS= read -r SO; do
+              test -n "$SO" || continue
+              BASE="${SO##*/}"
+              unzip -p "$APK" "$SO" > "$OUT/$revision-elf/$BASE"
+              sha256sum "$OUT/$revision-elf/$BASE" >> "$OUT/$revision-elf-sha256.txt"
+              readelf -W -d "$OUT/$revision-elf/$BASE" > "$OUT/$revision-$BASE-dynamic.txt" || true
+              "$REA" inspect-elf-notes "$OUT/$revision-elf/$BASE" --json > "$OUT/$revision-$BASE-rea-elf.json"
+            done < <(grep -E '^lib/arm64-v8a/[^/]+\.so$' "$OUT/$revision-apk-members.txt" | head -12)
+            echo "REA examined $revision APK: $(basename "$APK")"
+          done
+          {
+            echo 'APEX Tune Live compiled-APK REA evidence comparison'
+            echo "Baseline GitHub Actions run: 45183002376"
+            echo "Patched GitHub Actions run: 45195550388"
+            echo "REA package: rea-agents@6.10.1"
+            echo 'Read-only: app package, ARM64 library inventory, signing and ELF notes'
+            echo 'Unknown from static analysis: CPU callback deadlines, AudioTrack underruns, zipper noise perceptual severity'
+            echo ''
+            echo 'Added/removed APK members:'
+            diff -u "$OUT/before-apk-members.txt" "$OUT/after-apk-members.txt" || true
+            echo ''
+            echo 'Before APK SHA-256:'
+            cat "$OUT/before-apk.sha256"
+            echo 'After APK SHA-256:'
+            cat "$OUT/after-apk.sha256"
+          } > "$OUT/summary.txt"
+          cat "$OUT/summary.txt"
+          # Avoid including complete audio or user recordings in CI artifacts.
+          rm -rf "$OUT/before-elf" "$OUT/after-elf"
+
+      - name: Publish REA evidence for audio-engine investigation
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: APEX-TuneLive-REA-APK-static-evidence
+          path: ${{ runner.temp }}/rea-apex-report
+          if-no-files-found: warn
+          retention-days: 14

@@ -141,7 +141,8 @@ def main() -> int:
                            + manifest_package + " != " + project_package)
     package = manifest_package or project_package
     if package not in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait",
-                       "com.xziel.apex.zoomrewrite", "com.xziel.apex.framecache"):
+                       "com.xziel.apex.zoomrewrite", "com.xziel.apex.framecache",
+                       "com.xziel.apex.tunelivepreview"):
         raise RuntimeError("Unexpected APEX Android package: " + package)
     android_activity = package + "." + ACTIVITY_SIMPLE_NAME
     old = activity.get(f"{{{ANDROID_NS}}}name", "")
@@ -173,7 +174,8 @@ def main() -> int:
         marker = "    @Override\n    protected void onCreate"
         source = source.replace(marker, BENCHMARK_ACTIVITY + marker, 1)
     if args.benchmark or package in ("com.xziel.apex.zoomrewrite",
-                                     "com.xziel.apex.framecache"):
+                                     "com.xziel.apex.framecache",
+                                     "com.xziel.apex.tunelivepreview"):
         activity.set(f"{{{ANDROID_NS}}}hardwareAccelerated", "true")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
     java.write_text(source, encoding="utf-8")

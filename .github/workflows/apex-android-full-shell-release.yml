@@ -35,7 +35,7 @@ jobs:
           submodules: recursive
 
       - name: Install Projucer and Android build dependencies
-        timeout-minutes: 6
+        timeout-minutes: 18
         shell: bash
         run: |
           apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=25 -o Acquire::https::Timeout=25)
@@ -130,7 +130,10 @@ jobs:
           # Allow portrait + landscape under Android auto-rotate preferences;
           # packaging is NOT a device rotation test.
           grep -q 'android:screenOrientation="user"' "$MANIFEST"
-          if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-frame-cache" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-tunelive-20261123" ]]; then
+            grep -q "com.xziel.apex.tunelivepreview.ApexImmersiveActivity" "$MANIFEST"
+            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/tunelivepreview/ApexImmersiveActivity.java"
+          elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-frame-cache" ]]; then
             grep -q "com.xziel.apex.framecache.ApexImmersiveActivity" "$MANIFEST"
             test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/framecache/ApexImmersiveActivity.java"
           elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-zoom-rewrite" ]]; then
@@ -157,6 +160,19 @@ jobs:
           fi
           test -s "$HOME/.android/debug.keystore"
 
+      # Share Gradle dependency downloads between source-only rebuilds.
+      # Keep the generated wrapper and exporter definitions in the cache key;
+      # do not cache build outputs or signing keys.
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper/dists
+          key: apex-android-gradle-${{ runner.os }}-${{ hashFiles('My DAW/DAW_Core/Builds/AndroidFull/gradle/wrapper/gradle-wrapper.properties', 'My DAW/DAW_Core/Builds/AndroidFull/build.gradle', 'My DAW/DAW_Core/Builds/AndroidFull/settings.gradle', 'My DAW/DAW_Core/Builds/AndroidFull/app/build.gradle') }}
+          restore-keys: |
+            apex-android-gradle-${{ runner.os }}-
+
       - name: Build full original APEX for Android ARM64 with release compiler optimizations
         shell: bash
         working-directory: My DAW/DAW_Core/Builds/AndroidFull
@@ -179,7 +195,7 @@ jobs:
               exit 1
             fi
             if [ "$attempt" -eq 3 ]; then exit 1; fi
-            sleep $((attempt * 10))
+            sleep $((attempt * 60))
           done
 
       - name: Sign and verify RELEASE-optimized ARM64 preview APK
@@ -198,7 +214,9 @@ jobs:
             unsigned="android-release-real-apk/apex-release-unsigned-tmp-${found}.apk"
             aligned="android-release-real-apk/apex-release-aligned-tmp-${found}.apk"
             output="android-release-real-apk/APEX-Android-Original-Release-Optimized-ARM64-Preview-${found}.apk"
-            if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-frame-cache" ]]; then
+            if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-tunelive-20261123" ]]; then
+              output="android-release-real-apk/APEX-Mobile-TuneLive-${GITHUB_SHA:0:8}-ARM64-${found}.apk"
+            elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-frame-cache" ]]; then
               output="android-release-real-apk/APEX-Frame-Cache-${GITHUB_SHA:0:8}-ARM64-${found}.apk"
             elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-zoom-rewrite" ]]; then
               output="android-release-real-apk/APEX-Zoom-Rewrite-${GITHUB_SHA:0:8}-ARM64-${found}.apk"
@@ -230,7 +248,7 @@ jobs:
       - name: Upload release-optimized ORIGINAL APEX ARM64 preview APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.ref_name == 'feature/mobile-portrait-frame-cache' && 'APEX-Frame-Cache-ARM64' || (github.ref_name == 'feature/mobile-portrait-zoom-rewrite' && 'APEX-Zoom-Rewrite-ARM64' || 'APEX-Android-Original-Release-Optimized-ARM64-PREVIEW') }}
+          name: ${{ github.ref_name == 'feature/mobile-portrait-tunelive-20261123' && 'APEX-Mobile-TuneLive-ARM64' || (github.ref_name == 'feature/mobile-portrait-frame-cache' && 'APEX-Frame-Cache-ARM64' || (github.ref_name == 'feature/mobile-portrait-zoom-rewrite' && 'APEX-Zoom-Rewrite-ARM64' || 'APEX-Android-Original-Release-Optimized-ARM64-PREVIEW')) }}
           path: android-release-real-apk/*.apk
           if-no-files-found: error
           retention-days: 14

@@ -1,0 +1,49 @@
+name: Tune Live real JUCE 8 native syntax
+
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Source/TuneLiveUI/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_juce_native_syntax.cpp'
+      - '.github/workflows/apex-tune-live-native-syntax.yml'
+  push:
+    branches: [feature/apex-tune-live-native-v1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tune-live-native-juce-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  juce-windows-syntax:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Fetch exact public JUCE 8.0.12 release tag
+        shell: pwsh
+        run: |
+          git clone --quiet --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE.git "$env:RUNNER_TEMP\JUCE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $tag = (git -C "$env:RUNNER_TEMP\JUCE" describe --tags --exact-match).Trim()
+          if ($tag -ne "8.0.12") { throw "Unexpected JUCE tag $tag" }
+      - name: Syntax-check real Tune Live processor and UI against JUCE 8
+        shell: pwsh
+        run: |
+          # A narrow JUCE aggregator avoids the repository's optional
+          # custom headless module, which is not needed by this insert.
+          @'
+          #pragma once
+          #include <juce_audio_processors/juce_audio_processors.h>
+          #include <juce_audio_utils/juce_audio_utils.h>
+          '@ | Set-Content -Encoding utf8 -Path "$env:RUNNER_TEMP\JuceHeader.h"
+          cl /nologo /Zs /std:c++17 /EHsc /MD /W3 /DWIN32 /DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 /DJUCE_STANDALONE_APPLICATION=1 /DJUCE_PLUGINHOST_VST3=0 /DJUCE_ASIO=0 /DJUCE_USE_CURL=0 /DJUCE_WEB_BROWSER=0 /DJUCE_DONT_DECLARE_PROJECTINFO=1 /I "$env:RUNNER_TEMP" /I "$env:RUNNER_TEMP\JUCE\modules" /I "My DAW\DAW_Core\Source\ThirdParty" /I "My DAW\DAW_Core\Source\ThirdParty\signalsmith-stretch" "My DAW\DAW_Core\Tests\TuneLive\test_juce_native_syntax.cpp"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "GREEN: JUCE 8.0.12 processor, hosted parameter API, UI and preset code parse under MSVC"
