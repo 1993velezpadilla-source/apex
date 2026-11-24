@@ -457,7 +457,10 @@ private:
                 bank_.weight[bin] = onset ? bank_.targetWeight[bin] : 0.0;
             }
         }
-        if (!researchPhaseSlew_ || onset)
+        // At the fastest retune setting, follow the measured source frequency
+        // without a second 4-ms lag. The destination still uses the continuous
+        // one-ms ratio ramp; phase itself is never reset on an existing bank.
+        if (!researchPhaseSlew_ || onset || retune_ == 0.0f)
         {
             phaseHz_ = bank_.hz;
             bank_.sourceStep = Phase::rotate(kTau * bank_.hz / rate_);
