@@ -28,6 +28,19 @@ public:
         wetStep_ = 1.0 / (0.0015 * rate_ + 1.0);
         formantStep_ = 1.0 / (0.003 * rate_ + 1.0);
         agreementStep_ = 1.0 / (0.00030 * rate_ + 1.0);
+        // Short detector gaps must fade correction but preserve the fitted
+        // waveform. An immediate bank tear-down on every missed 1-ms hop
+        // clicks on breathy syllables and vowel/consonant transitions.
+        unvoicedHoldHops_ = std::max(2, static_cast<int>(
+            std::ceil(0.045 * rate_ / tracker_.hopSamples())));
+        // Preserve instantaneous transient attenuation; slow only the
+        // correction recovery to prevent sharp upward gain modulation.
+        correctionRestoreStep_ = 1.0 / (0.004 * rate_ + 1.0);
+        // Research variant only: glide harmonic oscillator F0 over 4ms
+        // instead of reprogramming its frequency at every pitch-tracker hop.
+        // Coefficients update every 16 samples; no memory or locks in callback.
+        phaseSlewStep_ = 1.0 - std::exp(-kControlHop / (rate_ * 0.004));
+        researchDecaySamples_ = std::max(2, static_cast<int>(std::ceil(0.005 * rate_)));
         decaySamples_ = std::max(2, static_cast<int>(std::ceil(0.0015 * rate_)));
         neutralHoldSamples_ = static_cast<int>(std::lround(0.045 * rate_));
         reset();
@@ -42,21 +55,42 @@ public:
         outgoing_ = {};
         envelope_.fill(0.0);
         lastCorrection_.fill(0.0);
+        lastDry_.fill(0.0);
         releaseOffset_.fill(0.0);
         position_ = filled_ = 0;
         targetShift_ = shift_ = confidence_ = wet_ = releaseAmount_ = 0.0;
         retune_ = -1.0f;
         controlLeft_ = decayLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
-        frequency_ = 0.0f;
+        missingPitchHops_ = postDropoutGuardHops_ = 0;
+        phaseLeft_ = 0;
+        phaseHz_ = 0.0;
         waveformReleaseCount_ = 0;
+        frequency_ = 0.0f;
     }
 
     static constexpr int latencySamples() noexcept { return 0; }
     float frequencyHz() const noexcept { return frequency_; }
     double correctionMix() const noexcept { return wet_; }
     double appliedShiftSemitones() const noexcept { return shift_; }
-    // Read after processing; diagnostic only, no cross-thread contract.
+    // Read after processing (test/diagnostic only; no cross-thread contract).
     unsigned waveformReleaseCount() const noexcept { return waveformReleaseCount_; }
+
+    // Deliberately NOT a user-facing plug-in setting. Set only before process()
+    // in isolated research tests. The shipping mode remains bit-for-bit default.
+    // The host may automate this control at a 128-frame boundary.
+    // Replacing the oscillator's mode in the middle of a vocal phrase can
+    // itself click; arm only when both live and release banks have finished.
+    void setResearchPhaseSlew(bool enabled) noexcept
+    {
+        requestedResearchPhaseSlew_ = enabled;
+        if (bank_.size == 0 && decayLeft_ <= 0 && researchPhaseSlew_ != enabled)
+        {
+            researchPhaseSlew_ = enabled;
+            phaseHz_ = 0.0;
+            phaseLeft_ = 0;
+        }
+    }
+    bool researchPhaseSlewEnabledForTest() const noexcept { return researchPhaseSlew_; }
 
     void process(float* const* data, int channels, int samples, const DspSettings& settings) noexcept
     {
@@ -120,6 +154,17 @@ public:
                 advanceControl();
                 controlLeft_ = kControlHop;
             }
+            // Continuous phase is more than keeping the phase phasor alive:
+            // the frequency driving that phasor must not jump on each
+            // detector update. Research mode glides only phase increments;
+            // musical target note and all wet safety gates remain unchanged.
+            if (researchPhaseSlew_ && bank_.size > 0 && --phaseLeft_ <= 0)
+            {
+                phaseLeft_ = kControlHop;
+                phaseHz_ += phaseSlewStep_ * (bank_.hz - phaseHz_);
+                bank_.sourceStep = Phase::rotate(kTau * phaseHz_ / rate_);
+                updateDestinationStep();
+            }
 
             // An active note can cross the target pitch several times per
             // vibrato cycle. Keep the current phase-coherent renderer through
@@ -137,14 +182,17 @@ public:
             if (mix == 0.0 && wet_ == 0.0)
                 decayLeft_ = 0;
 
-            // Complementary smoothstep handoff: the released bank already
-            // starts at lastCorrection_. Adding the new bank at full gain
-            // would introduce a correction-only step on the first sample.
+            // The old and freshly detected note must be *complementary*
+            // during a bank handoff. Previously both corrections were at
+            // near-full level for the first millisecond, making a transient
+            // at pitch leaps despite a smoothed phase increment. Keep the
+            // existing decay duration and apply the envelope in both modes.
             double incomingWeight = 1.0;
             if (decayLeft_ > 0 && bank_.size > 0)
             {
-                const double t = static_cast<double>(decayLeft_) / decaySamples_;
-                incomingWeight = 1.0 - t * t * (3.0 - 2.0 * t);
+                const double t = static_cast<double>(decayLeft_) / decaySpan_;
+                const double oldWeight = t * t * (3.0 - 2.0 * t);
+                incomingWeight = 1.0 - oldWeight;
             }
             Sample delta = renderOutgoing(mix);
             if (bank_.size > 0)
@@ -163,8 +211,60 @@ public:
             for (int c = 0; c < channels_; ++c)
             {
                 const auto channel = static_cast<std::size_t>(c);
-                data[c][i] = static_cast<float>(std::clamp(input[channel] + delta[channel], -8.0, 8.0));
+                // True dry transients are never touched. Only the synthesized
+                // pitch correction is derivative-limited when a phase-model
+                // reacquisition produces a one-sample step (audible click).
+                // 0.18 FS/sample exceeds the normal note-transition peak
+                // measured by the existing tracking gauntlet (~0.162), but
+                // eliminates the 0.28-FS dropout pop without buffering/PDC.
+                // Experimental transition safety: a sudden loss of model
+                // agreement means the synthetic correction can collapse
+                // by >0.1 FS in one sample, even before a new pitch is
+                // detected. Hold the *correction derivative* to the normal
+                // harmonic-band scale during those rare transitions. This
+                // never touches the dry sample, and the shipping branch
+                // keeps its existing, wider 0.18 protection unchanged.
+                const bool weakModel = bank_.size > 0 &&
+                    bank_.correctionGain[channel] < 0.80;
+                const bool outgoingTransition = decayLeft_ > 0 && outgoing_.size > 0;
+                // Preserve natural high-frequency vocal harmonics: full
+                // time correction slew made *more* suspicious events on real
+                // singers. Keep the tight guard during a known model fade,
+                // and reserve the separate output-slope guard for rare gross
+                // correction-only discontinuities.
+                const double maxCorrectionStep =
+                    researchPhaseSlew_ && (weakModel || outgoingTransition)
+                        ? 0.034 : 0.18;
+                double correction = std::clamp(
+                    delta[channel], lastCorrection_[channel] - maxCorrectionStep,
+                    lastCorrection_[channel] + maxCorrectionStep);
+                if (researchPhaseSlew_)
+                {
+                    // The original waveform's instantaneous derivative is
+                    // our protection for authentic sharp consonants and
+                    // loud high-register partials. A gross added-sample
+                    // discontinuity must be well above both the dry movement
+                    // and the normal corrected harmonic slope before we
+                    // adjust it. Otherwise pass the correction unchanged.
+                    const double drySlope = input[channel] - lastDry_[channel];
+                    const double correctionSlope = correction - lastCorrection_[channel];
+                    const double requestedOutputSlope = drySlope + correctionSlope;
+                    const double naturalCap = std::max(0.040,
+                        std::abs(drySlope) + 0.010);
+                    // At strong high-register vowels a 0.04-FS correction
+                    // impulse can add to the perfectly natural dry slope.
+                    // Detect the *excess over dry*, not a blanket high-pass
+                    // that clips harmonic-rich singing every sample.
+                    const bool anomaly = std::abs(correctionSlope) > 0.040 &&
+                        std::abs(requestedOutputSlope) > naturalCap + 0.008;
+                    if (anomaly)
+                        correction += std::clamp(requestedOutputSlope,
+                            -naturalCap, naturalCap) - requestedOutputSlope;
+                }
+                data[c][i] = static_cast<float>(std::clamp(input[channel] + correction, -8.0, 8.0));
                 lastCorrection_[channel] = static_cast<double>(data[c][i]) - input[channel];
+                if (researchPhaseSlew_)
+                    lastDry_[channel] = input[channel];
             }
         }
     }
@@ -248,18 +348,56 @@ private:
 
     void followPitch(PitchTracker::Result pitch, VoiceSettings policy, bool preserveFormants) noexcept
     {
+        if (!pitch.voiced || !std::isfinite(pitch.hz) || pitch.hz <= 0.0f)
+        {
+            handlePitchLoss();
+            return;
+        }
+        // The pitch detector observes low-pass-filtered history. During an
+        // 8-ms vowel gap that history can still return a highly confident
+        // spurious 55-Hz subharmonic even though the microphone is silent.
+        // Require the most recent 2 ms of *raw* input to carry real energy
+        // before allowing a new note to change the oscillator phase bank.
+        // This fixed 192-frame bound is inexpensive at 192 kHz and alloc-free.
+        const unsigned recentCount = std::min(filled_,
+            static_cast<unsigned>(std::clamp(static_cast<int>(rate_ * 0.002), 16, 192)));
+        double recentEnergy = 0.0;
+        for (unsigned back = 0; back < recentCount; ++back)
+        {
+            const auto& sample = history_[(position_ - 1u - back) & (kHistory - 1)];
+            const double left = sample[0], right = sample[1];
+            recentEnergy += std::max(left * left, right * right);
+        }
+        if (recentCount < 16u || recentEnergy < 1.0e-6 * recentCount)
+        {
+            handlePitchLoss();
+            return;
+        }
         const auto decision = voice_.update(pitch, policy);
         if (!decision.voiced)
         {
-            if (bank_.size > 0)
-                releaseWaveform();
-            frequency_ = 0.0f;
-            targetShift_ = confidence_ = 0.0;
+            handlePitchLoss();
             return;
         }
-
-        if (bank_.size > 0 && (pitch.hz > bank_.hz * 1.19 || pitch.hz * 1.19 < bank_.hz))
+        // Reacquired detector tones can briefly select a harmonic/octave
+        // after an airy break. Do not destroy the phase bank on that single
+        // outlier; require the new distant pitch to persist for ~12 ms.
+        if (missingPitchHops_ > 0 && bank_.size > 0)
+            postDropoutGuardHops_ = std::max(2, static_cast<int>(
+                std::ceil(0.012 * rate_ / tracker_.hopSamples())));
+        missingPitchHops_ = 0;
+        const bool jump = bank_.size > 0 &&
+            (pitch.hz > bank_.hz * 1.19 || pitch.hz * 1.19 < bank_.hz);
+        if (jump && postDropoutGuardHops_ > 0)
+        {
+            --postDropoutGuardHops_;
+            confidence_ = 0.0;
+            return;
+        }
+        if (jump)
             releaseWaveform();
+        else
+            postDropoutGuardHops_ = 0;
         const bool onset = bank_.size == 0;
         const int priorSize = bank_.size;
         frequency_ = pitch.hz;
@@ -295,11 +433,28 @@ private:
             if (h >= priorSize)
                 bank_.gain[bin] = 1.0;
         }
-        bank_.sourceStep = Phase::rotate(kTau * bank_.hz / rate_);
+        if (!researchPhaseSlew_ || onset)
+        {
+            phaseHz_ = bank_.hz;
+            bank_.sourceStep = Phase::rotate(kTau * bank_.hz / rate_);
+        }
         bank_.learningStep = std::min(2.2 * bank_.hz / rate_, 0.68 / bank_.size);
         if (onset)
             initialiseWaveform();
         updateEnvelope(preserveFormants);
+    }
+
+    void handlePitchLoss() noexcept
+    {
+        frequency_ = 0.0f;
+        confidence_ = 0.0; // smoothly return the current consonant to dry
+        if (bank_.size == 0)
+            return;
+        if (++missingPitchHops_ < unvoicedHoldHops_)
+            return;
+        targetShift_ = 0.0;
+        voice_.reset();
+        releaseWaveform();
     }
 
     void advanceControl() noexcept
@@ -338,7 +493,8 @@ private:
         if (bank_.size == 0)
             return;
         bank_.ratio = std::exp2(shift_ / 12.0);
-        bank_.destinationStep = Phase::rotate(kTau * bank_.hz * bank_.ratio / rate_);
+        const double renderHz = researchPhaseSlew_ && phaseHz_ > 0.0 ? phaseHz_ : bank_.hz;
+        bank_.destinationStep = Phase::rotate(kTau * renderHz * bank_.ratio / rate_);
         // Lock both oscillators together once the correction has fully faded.
         if (wet_ == 0.0 && std::abs(shift_) < 0.01)
             bank_.destination = bank_.source;
@@ -420,7 +576,15 @@ private:
             constexpr double tolerance = 0.08;
             constexpr double transitionWidth = 0.45;
             const double fade = std::clamp((mismatch - tolerance) / transitionWidth, 0.0, 1.0);
-            bank_.correctionGain[channel] = 1.0 - fade * fade * (3.0 - 2.0 * fade);
+            const double requestedGain = 1.0 - fade * fade * (3.0 - 2.0 * fade);
+            auto& correctionGain = bank_.correctionGain[channel];
+            // Keep protective attenuation immediate: slowing the attack
+            // created oversized peaks on abrupt real note transitions.
+            // Only the recovery is slewed, preventing rapid upward zipper.
+            if (requestedGain < correctionGain)
+                correctionGain = requestedGain;
+            else
+                correctionGain += correctionRestoreStep_ * (requestedGain - correctionGain);
             for (int h = 0; h < bank_.size; ++h)
             {
                 const auto bin = static_cast<std::size_t>(h);
@@ -438,10 +602,14 @@ private:
         ++waveformReleaseCount_;
         outgoing_ = bank_;
         bank_ = {};
-        decayLeft_ = decaySamples_;
+        decaySpan_ = researchPhaseSlew_ ? researchDecaySamples_ : decaySamples_;
+        decayLeft_ = decaySpan_;
+        phaseHz_ = 0.0;
+        phaseLeft_ = 0;
         releaseAmount_ = wet_;
         wet_ = shift_ = 0.0;
         controlLeft_ = neutralLeft_ = fastRetuneLeft_ = 0;
+        missingPitchHops_ = postDropoutGuardHops_ = 0;
     }
 
     Sample renderOutgoing(double mix) noexcept
@@ -462,13 +630,13 @@ private:
             source = source * outgoing_.source;
             destination = destination * outgoing_.destination;
         }
-        const double progress = static_cast<double>(decayLeft_) / decaySamples_;
+        const double progress = static_cast<double>(decayLeft_) / decaySpan_;
         const double window = progress * progress * (3.0 - 2.0 * progress);
         for (int c = 0; c < channels_; ++c)
         {
             const auto channel = static_cast<std::size_t>(c);
             delta[channel] *= releaseAmount_ * outgoing_.correctionGain[channel];
-            if (decayLeft_ == decaySamples_)
+            if (decayLeft_ == decaySpan_)
                 releaseOffset_[channel] = lastCorrection_[channel] - delta[channel];
             delta[channel] = window * (delta[channel] + window * releaseOffset_[channel]);
             if (mix == 0.0 && releaseAmount_ == 0.0)
@@ -484,18 +652,24 @@ private:
     VoiceControl voice_;
     std::array<std::array<float, 2>, kHistory> history_{};
     Bank bank_{}, outgoing_{};
-    Sample envelope_{}, lastCorrection_{}, releaseOffset_{};
+    Sample envelope_{}, lastCorrection_{}, lastDry_{}, releaseOffset_{};
     double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
+    double correctionRestoreStep_ = 0.0;
+    double phaseSlewStep_ = 0.0, phaseHz_ = 0.0;
     double targetShift_ = 0.0, shift_ = 0.0, confidence_ = 0.0, wet_ = 0.0;
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
     double fastRetuneStart_ = 0.0, fastRetuneProgress_ = 0.0, fastWetStep_ = 0.0;
     float frequency_ = 0.0f, retune_ = -1.0f;
     unsigned position_ = 0, filled_ = 0;
     int channels_ = 1, decaySamples_ = 2, decayLeft_ = 0, controlLeft_ = 0;
+    int phaseLeft_ = 0, researchDecaySamples_ = 2, decaySpan_ = 2;
     int neutralHoldSamples_ = 0, neutralLeft_ = 0;
     int fastRetuneSamples_ = 0, fastRetuneLeft_ = 0;
+    int unvoicedHoldHops_ = 2, missingPitchHops_ = 0, postDropoutGuardHops_ = 0;
     unsigned waveformReleaseCount_ = 0;
     bool prepared_ = false;
+    bool researchPhaseSlew_ = false;
+    bool requestedResearchPhaseSlew_ = false;
 };
 
 } // namespace APEX::TuneLive
