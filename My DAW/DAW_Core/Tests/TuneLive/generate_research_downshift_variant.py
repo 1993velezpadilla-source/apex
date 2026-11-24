@@ -5,7 +5,7 @@ Do not edit, replace, or configure the production DspCore. The generated file
 is in the CI workspace only, and can be audited by diff of a handful of
 deliberately anchored replacements. Its compensation is disabled by default,
 and the offline renderer must prove that its disabled output is bit-identical
-to the pinned production HQ40 WAV before analyzing the enabled variant.
+to the current production HQ40 WAV before analyzing the enabled variant.
 
 Never add this output header to the JUCE application or shipping plugin build.
 """
@@ -38,9 +38,9 @@ exactly_one(
     void setResearchCompensationEnabled(bool value) noexcept {enabled_=value;}
     void prepare(double sampleRate,int maxBlockSize,int numChannels,""")
 exactly_one(
-    "            stretch_.setTransposeFactor(std::pow(2.0f,smooth_/12.0f));",
-    """            const float corrected=enabled_?experimentalDownshift(smooth_,frequency_):smooth_;
-            stretch_.setTransposeFactor(std::pow(2.0f,corrected/12.0f));""")
+    "                stretch_.setTransposeFactor(std::exp2(smooth_/12.0f));",
+    """                const float corrected=enabled_?experimentalDownshift(smooth_,frequency_):smooth_;
+                stretch_.setTransposeFactor(std::exp2(corrected/12.0f));""")
 exactly_one("private:\n    PitchTracker tracker_;",
 """private:
     // Measured direct-shifter transfer inverse. These knots apply ONLY to
