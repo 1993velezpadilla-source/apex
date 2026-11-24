@@ -84,8 +84,66 @@ bool test(const Scenario& scenario,int channels,int note,double& correctedCents)
     return improved && peak>0.01 && peak<2.0
        && core.latencySamples()==1920;
 }
+// Fixed sample-clock control must be independent of callback fragmentation.
+// Compare the real DSP control state after every 240 source samples while
+// a singer changes pitch, drops out, and changes key/retune settings.
+bool testControlClock() {
+    using namespace APEX::TuneLive;
+    constexpr int length=sr/2, checkpoint=240;
+    std::vector<float> dry(length);
+    double phase=0.0;
+    for(int i=0;i<length;++i) {
+        const double hz=i<sr/8?227.0:i<sr/4?341.0:450.0;
+        phase+=2*pi*hz/sr;
+        dry[i]=(i>=sr/4 && i<sr/4+960)?0.0f:
+            static_cast<float>(0.29*std::sin(phase)+0.055*std::sin(2*phase));
+    }
+    auto fixedAudio=dry, variedAudio=dry;
+    DspCore fixed,varied;
+    fixed.prepare(sr,128,1);
+    varied.prepare(sr,128,1);
+    DspSettings settings;
+    settings.correction=settings.wet=1.0f;
+    settings.humanize=settings.flexTune=0.0f;
+    settings.retune=0.0f;
+    constexpr std::array<int,5> pattern{{1,7,64,257,17}};
+    std::size_t part=0;
+    double maxShift=0.0,maxWet=0.0;
+    for(int start=0;start<length;start+=checkpoint) {
+        const int end=std::min(start+checkpoint,length);
+        settings.key=start<sr/4?0:9;
+        settings.scale=start<sr/4?1:2;
+        settings.retune=start<sr/4?0.0f:0.35f;
+        float* a[]={fixedAudio.data()+start};
+        fixed.process(a,1,end-start,settings);
+        for(int pos=start;pos<end;) {
+            const int count=std::min(end-pos,pattern[part++%pattern.size()]);
+            float* b[]={variedAudio.data()+pos};
+            varied.process(b,1,count,settings);
+            pos+=count;
+        }
+        maxShift=std::max(maxShift,std::abs(static_cast<double>(
+            fixed.debugAppliedShiftSemitones()-varied.debugAppliedShiftSemitones())));
+        maxWet=std::max(maxWet,std::abs(static_cast<double>(
+            fixed.debugWetAmount()-varied.debugWetAmount())));
+        if(fixed.debugTargetShiftSemitones()!=varied.debugTargetShiftSemitones())
+            return false;
+    }
+    const bool finite=std::all_of(fixedAudio.begin(),fixedAudio.end(),
+        [](float x){return std::isfinite(x);}) &&
+        std::all_of(variedAudio.begin(),variedAudio.end(),
+        [](float x){return std::isfinite(x);});
+    std::cout<<"fixed_control_clock_max_shift="<<maxShift
+             <<" max_wet="<<maxWet<<"\\n";
+    return finite && maxShift<1.0e-6 && maxWet<1.0e-6 &&
+        fixed.latencySamples()==1920 && varied.latencySamples()==1920;
+}
 }
 int main(){
+    if(!testControlClock()) {
+        std::cerr<<"FAIL: pitch control clock depends on callback fragmentation\\n";
+        return 1;
+    }
     constexpr std::array<Scenario,5> plans{{
         {{{128,128,128,128,128}},"native128"},
         {{{1,7,64,128,257}},"mixed_host"},
