@@ -120,6 +120,17 @@ private:
 
     PitchTracker::Result analyse() noexcept
     {
+        // A correlation peak calculated from trailing voiced history can
+        // misidentify near-silence as a strong 55-Hz subharmonic. The most
+        // recent millisecond must actually contain audible voiced energy;
+        // checking only the larger, lag-dependent history is insufficient.
+        // Uses the existing prefix-energy ring: no allocation or FFT.
+        constexpr int kRecentSamples = 8;
+        constexpr double kMinimumRecentMeanSquare = 8.0e-6;
+        if (ready_ <= kRecentSamples ||
+            energyAtAge(0) - energyAtAge(kRecentSamples)
+                < kMinimumRecentMeanSquare * kRecentSamples)
+            return {};
         const auto& range = rangeInfo(range_);
         const int low = std::max(firstLag_, static_cast<int>(std::floor(detectorRate_ / range.maximumHz)));
         const int high = std::min(lastLag_, static_cast<int>(std::ceil(detectorRate_ / range.minimumHz)));
