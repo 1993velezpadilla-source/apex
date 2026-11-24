@@ -40,10 +40,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
-            --retry-delay 8 --connect-timeout 40 --max-time 480 \
+          # Use the documented Zenodo file API as an alternate delivery route.
+          # Both routes must yield the identical pinned archive; never substitute audio.
+          for url in \
             'https://zenodo.org/records/5578807/files/vocadito.zip?download=1' \
-            -o vocadito.zip
+            'https://zenodo.org/api/records/5578807/files/vocadito.zip/content'; do
+            rm -f vocadito.zip.part
+            if curl --fail --location --silent --show-error --retry 2 --retry-all-errors \
+              --retry-delay 8 --connect-timeout 40 --max-time 300 \
+              "$url" -o vocadito.zip.part && \
+              echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip.part' | md5sum --check -; then
+              mv vocadito.zip.part vocadito.zip
+              break
+            fi
+          done
+          test -s vocadito.zip
       - name: Verify pinned public-singing archive after cache or download
         shell: bash
         run: |
