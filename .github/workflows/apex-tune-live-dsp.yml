@@ -6,7 +6,7 @@ on:
       - 'My DAW/DAW_Core/Tests/TuneLive/**'
       - '.github/workflows/apex-tune-live-dsp.yml'
   push:
-    branches: [feature/apex-tune-live-native-v1]
+    branches: [feature/apex-tune-live-native-v1, feature/mobile-portrait-tunelive-20261123, feature/windows-arranger-tunelive-20261123]
   workflow_dispatch:
 
 # Only the newest PR head is worth expensive full-DSP tests.
