@@ -102,7 +102,10 @@ int main() {
             researchButton=toggle;
     if (!researchButton)
         return fail("missing opt-in Tracking anti-click A/B control");
-    researchButton->triggerClick();
+    // triggerClick() posts an asynchronous message, but this console
+    // harness has no dispatch loop. Use JUCE's synchronous click notification
+    // to exercise the actual editor callback before inspecting the parameter.
+    researchButton->setToggleState(true,juce::sendNotificationSync);
     if (researchParameter->getValue()!=1.0f)
         return fail("Tracking anti-click A/B GUI parameter was not updated");
     juce::MemoryBlock researchState;
