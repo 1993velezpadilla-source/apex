@@ -536,7 +536,19 @@ private:
         }
     }
 
+    // Specialise the inner harmonic loops for the prepared channel count.
+    // This retains the operation order and all per-channel state, but
+    // removes the runtime loop bound from every partial on the audio thread.
     void renderAndLearn(const Sample& input, Sample& delta) noexcept
+    {
+        if (channels_ == 1)
+            renderAndLearnChannels<1>(input, delta);
+        else
+            renderAndLearnChannels<2>(input, delta);
+    }
+
+    template<int Channels>
+    void renderAndLearnChannels(const Sample& input, Sample& delta) noexcept
     {
         std::array<Phase, kPartials> basis;
         Sample predicted{}, correction{};
@@ -548,7 +560,7 @@ private:
             auto& gain = bank_.gain[bin];
             gain += formantStep_ * (bank_.targetGain[bin] - gain);
             const double weight = bank_.weight[bin];
-            for (int c = 0; c < channels_; ++c)
+            for (int c = 0; c < Channels; ++c)
             {
                 const auto channel = static_cast<std::size_t>(c);
                 const auto& p = bank_.partials[channel][bin];
@@ -561,7 +573,7 @@ private:
         }
         // Learn all partials from the same residual, so a strong harmonic
         // cannot leak into the independent estimates of its neighbours.
-        for (int c = 0; c < channels_; ++c)
+        for (int c = 0; c < Channels; ++c)
         {
             const auto channel = static_cast<std::size_t>(c);
             const double residual = input[channel] - predicted[channel];
@@ -614,6 +626,15 @@ private:
 
     Sample renderOutgoing(double mix) noexcept
     {
+        if (decayLeft_ <= 0)
+            return {};
+        return channels_ == 1 ? renderOutgoingChannels<1>(mix)
+                              : renderOutgoingChannels<2>(mix);
+    }
+
+    template<int Channels>
+    Sample renderOutgoingChannels(double mix) noexcept
+    {
         Sample delta{};
         if (decayLeft_ <= 0)
             return delta;
@@ -621,7 +642,7 @@ private:
         for (int h = 0; h < outgoing_.size; ++h)
         {
             const auto bin = static_cast<std::size_t>(h);
-            for (int c = 0; c < channels_; ++c)
+            for (int c = 0; c < Channels; ++c)
             {
                 const auto channel = static_cast<std::size_t>(c);
                 const auto& p = outgoing_.partials[channel][bin];
@@ -632,7 +653,7 @@ private:
         }
         const double progress = static_cast<double>(decayLeft_) / decaySpan_;
         const double window = progress * progress * (3.0 - 2.0 * progress);
-        for (int c = 0; c < channels_; ++c)
+        for (int c = 0; c < Channels; ++c)
         {
             const auto channel = static_cast<std::size_t>(c);
             delta[channel] *= releaseAmount_ * outgoing_.correctionGain[channel];
