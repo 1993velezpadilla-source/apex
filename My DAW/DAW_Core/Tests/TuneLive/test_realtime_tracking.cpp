@@ -395,9 +395,12 @@ bool testExperimentalToggleDefersUntilUnvoiced() {
         silence.fill(0.0f);
         float* audio[]{silence.data()};
         engine.process(audio,1,static_cast<int>(silence.size()),settings);
-        engine.setResearchPhaseSlew(true);
+        // Do not repeat the request: a pending change must commit on the
+        // first idle sample without another host parameter notification.
     }
-    return engine.researchPhaseSlewEnabledForTest();
+    if (!engine.researchPhaseSlewEnabledForTest()) return false;
+    engine.setResearchPhaseSlew(false);
+    return !engine.researchPhaseSlewEnabledForTest();
 }
 
 bool testDetectorDropoutStability() {
