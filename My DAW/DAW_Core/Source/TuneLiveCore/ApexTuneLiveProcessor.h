@@ -59,7 +59,7 @@ public:
     static constexpr const char* kVersion = "0.2.0-beta";
     enum Index { kAmount, kSpeed, kKey, kScale, kMix, kBypass,
                  kHumanize, kNoteStability, kPreserveFormants, kFlexTune, kA4Reference,
-                 kVocalRange, kVibratoPreserve, kNumParams };
+                 kVocalRange, kVibratoPreserve, kExperimentalDeclick, kNumParams };
 
     explicit Processor(Engine engine = Engine::Studio) : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
@@ -79,6 +79,10 @@ public:
         add(kA4Reference, "tunelive.a4Reference", "A4 Reference (430-450 Hz)", 0.50f);
         add(kVocalRange, "tunelive.vocalRange", "Vocal Range", 0.0f, static_cast<int>(kVocalRanges.size()));
         add(kVibratoPreserve, "tunelive.vibratoPreserve", "Vibrato Preservation", isTracking() ? 0.85f : 0.0f);
+        // Appended ID keeps existing APEX projects and automations stable.
+        // OFF by default; evaluated on two licensed human singers and not
+        // promoted to the regular renderer without Android monitoring QA.
+        add(kExperimentalDeclick, "tunelive.experimentalDeclick", "Anti-Click A/B Research", 0.0f, 2);
     }
     bool isTracking() const noexcept { return tracking_ != nullptr; }
     const juce::String getName() const override { return isTracking() ? kTrackingName : kPluginName; }
@@ -112,6 +116,7 @@ public:
         int latency = 0;
         if (tracking_) {
             tracking_->prepare(rate, channels);
+            tracking_->setResearchPhaseSlew(param(kExperimentalDeclick) >= 0.5f);
             latency = tracking_->latencySamples();
         } else {
             dsp_.prepare(rate, block, channels);
@@ -195,6 +200,10 @@ private:
         const int channels = buffer.getNumChannels();
         const int samples = buffer.getNumSamples();
         if (tracking_) {
+            // JUCE parameter read uses relaxed atomic load, no heap work on
+            // the audio callback. Switching modes is for controlled A/B;
+            // the released/default path remains unchanged when OFF.
+            tracking_->setResearchPhaseSlew(param(kExperimentalDeclick) >= 0.5f);
             tracking_->process(data, channels, samples, settings);
             lastHz_.store(tracking_->frequencyHz(), std::memory_order_relaxed);
             lastShift_.store(static_cast<float>(tracking_->appliedShiftSemitones()), std::memory_order_relaxed);
@@ -208,7 +217,8 @@ private:
         "tunelive.amount", "tunelive.speed", "tunelive.key", "tunelive.scale",
         "tunelive.mix", "tunelive.bypass", "tunelive.humanize",
         "tunelive.noteStability", "tunelive.preserveFormants",
-        "tunelive.flexTune", "tunelive.a4Reference", "tunelive.vocalRange", "tunelive.vibratoPreserve"};
+        "tunelive.flexTune", "tunelive.a4Reference", "tunelive.vocalRange",
+        "tunelive.vibratoPreserve", "tunelive.experimentalDeclick"};
     void add(int index, const char* id, const char* name, float value, int steps=0) {
         auto p = std::make_unique<TuneLiveParameter>(id, name, value, steps);
         params_[static_cast<std::size_t>(index)] = p.get();
