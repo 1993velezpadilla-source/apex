@@ -241,7 +241,7 @@ public:
             // whole commit - the input watchdog and record preflight surface
             // the input problem without killing playback.
             if (setup.inputDeviceName.isNotEmpty()
-                && !(r.typeName.containsIgnoreCase("Oboe") && r.bufferSize < 192))
+                && !r.typeName.containsIgnoreCase("Oboe"))
             {
                 DBG("[DeviceSession] combined open failed: " + error
                     + " - retrying output-only");
@@ -279,6 +279,21 @@ public:
             + " open=" + juce::String(activeDevice != nullptr && activeDevice->isOpen() ? 1 : 0)
             + " playing=" + juce::String(activeDevice != nullptr && activeDevice->isPlaying() ? 1 : 0)
             + " lastError=" + (activeDevice != nullptr ? activeDevice->getLastError() : juce::String("<null>")));
+
+        if (r.typeName.containsIgnoreCase("Oboe"))
+        {
+            const bool valid = activeDevice != nullptr && activeDevice->isOpen()
+                && activeType == r.typeName
+                && std::abs(activeDevice->getCurrentSampleRate() - r.sampleRate) < 0.01
+                && (resolvedInput.isEmpty() || !activeDevice->getActiveInputChannels().isZero());
+            if (!valid)
+            {
+                dm_.setCurrentAudioDeviceType(oldType, true);
+                const auto restoreError = dm_.setAudioDeviceSetup(oldSetup, true);
+                return "Oboe could not open the requested sample rate/input. "
+                    + (restoreError.isEmpty() ? juce::String("Previous setup restored.") : "Restore failed: " + restoreError);
+            }
+        }
 
         if (r.typeName.containsIgnoreCase("asio"))
         {

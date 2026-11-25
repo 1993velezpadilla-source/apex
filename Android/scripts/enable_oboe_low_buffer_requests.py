@@ -1,59 +1,31 @@
 #!/usr/bin/env python3
-"""Patch the pinned JUCE 8.0.12 Android Oboe backend.
-
-These are trial requests, not hardware capability guarantees. JUCE's device
-manager otherwise replaces non-burst-aligned requests with its default.
-Expose the initial negotiated output queue size for these trial requests.
-Do not force a fixed callback quantum or alter the desktop backend.
-"""
+"""Apply APEX Android Oboe negotiation and callback hardening to JUCE 8.0.12."""
 from pathlib import Path
 import sys
+import json
 
-def patch(source):
-    edits = [
-        (
-            "return AndroidHighPerformanceAudioHelpers::getAvailableBufferSizes (getNativeBufferSize(), getAvailableSampleRates());",
-            """auto sizes = AndroidHighPerformanceAudioHelpers::getAvailableBufferSizes (getNativeBufferSize(), getAvailableSampleRates());
-        // APEX experimental requests: Oboe may clamp these to its native minimum.
-        for (const int trial : { 32, 48, 64, 96, 128, 160 })
-            sizes.addIfNotAlreadyThere (trial);
-        sizes.sort();
-        return sizes;"""
-        ),
-        (
-            '        if (! deviceOpen)\n            lastError = "Failed to create audio session";',
-            '''        if (! deviceOpen)
-            lastError = "Failed to create audio session";
-        else if (actualBufferSize < 192)
-        {
-            const auto negotiated = session->getInitialOutputBufferSize();
-            if (negotiated > 0)
-                actualBufferSize = negotiated;
-        }'''
-        ),
-        (
-            "        int getCurrentBitDepth() const noexcept { return bitDepth; }",
-            """        int getCurrentBitDepth() const noexcept { return bitDepth; }
+OBOE_EDITS = json.loads("[[\"        // either invalid device was requested or its input&output don't have compatible sample rate\\n        jassert (result.size() > 0);\",\"        // Oboe can convert these project rates when the endpoint is fixed-rate.\\n        // Opening both streams and checking their client rates is authoritative.\\n        result.addIfNotAlreadyThere (44100.0);\\n        result.addIfNotAlreadyThere (48000.0);\\n        result.sort();\"],[\"return AndroidHighPerformanceAudioHelpers::getAvailableBufferSizes (getNativeBufferSize(), getAvailableSampleRates());\",\"// Do not open a second exclusive stream just to enumerate buffers.\\n        auto sizes = AndroidHighPerformanceAudioHelpers::getAvailableBufferSizes (\\n            jmax (1, AndroidHighPerformanceAudioHelpers::getNativeBufferSizeHint()), getAvailableSampleRates());\\n        for (const int trial : { 32, 48, 64, 96, 128, 160, 192, 256, 384, 512, 768, 1024, 1536, 2048, 4096 })\\n            sizes.addIfNotAlreadyThere (trial);\\n        sizes.sort();\\n        return sizes;\"],[\"        if (! deviceOpen)\\n            lastError = \\\"Failed to create audio session\\\";\",\"        if (! deviceOpen)\\n            lastError = \\\"Failed to create audio session\\\";\\n        else\\n        {\\n            const auto negotiated = session->getInitialOutputBufferSize();\\n            if (negotiated > 0)\\n                actualBufferSize = negotiated;\\n        }\"],[\"return AndroidHighPerformanceAudioHelpers::getDefaultBufferSize (getNativeBufferSize(), getCurrentSampleRate());\",\"return AndroidHighPerformanceAudioHelpers::getDefaultBufferSize (\\n            jmax (1, AndroidHighPerformanceAudioHelpers::getNativeBufferSizeHint()), getCurrentSampleRate());\"],[\"            builder.setSampleRate (newSampleRate);\",\"            builder.setSampleRate (newSampleRate);\\n            builder.setSampleRateConversionQuality (oboe::SampleRateConversionQuality::Medium);\"],[\"                stream->setBufferSizeInFrames (newBufferSize);\",\"                // A one-burst queue is especially vulnerable to scheduling jitter.\\n                // Start at two bursts, or the requested size if larger.\\n                const auto safeRequest = jmax (newBufferSize, 2 * stream->getFramesPerBurst());\\n                stream->setBufferSizeInFrames (safeRequest);\"],[\"            return outputStream != nullptr && outputStream->openedOk();\",\"            if (outputStream == nullptr || ! outputStream->openedOk())\\n                return false;\\n            const auto output = outputStream->getNativeStream();\\n            if (output == nullptr || output->getSampleRate() != sampleRate)\\n                return false;\\n            if (inputStream != nullptr)\\n            {\\n                const auto input = inputStream->getNativeStream();\\n                if (input == nullptr || input->getSampleRate() != sampleRate)\\n                    return false;\\n            }\\n            return true;\"],[\"        int getCurrentBitDepth() const noexcept { return bitDepth; }\",\"        int getCurrentBitDepth() const noexcept { return bitDepth; }\\n\\n        int getInitialOutputBufferSize() const\\n        {\\n            if (outputStream != nullptr && outputStream->openedOk())\\n                if (auto stream = outputStream->getNativeStream())\\n                    return stream->getBufferSizeInFrames();\\n            return 0;\\n        }\"],[\"              inputStreamNativeBuffer (static_cast<size_t> (numInputChannelsToUse * getBufferCapacityInFrames (true))),\\n              inputStreamSampleBuffer (numInputChannels, getBufferCapacityInFrames (true)),\\n              outputStreamSampleBuffer (numOutputChannels, getBufferCapacityInFrames (false))\",\"              inputStreamNativeBuffer (static_cast<size_t> (numInputChannelsToUse) * static_cast<size_t> (jmax (8192, getBufferCapacityInFrames (true)))),\\n              inputStreamSampleBuffer (numInputChannels, jmax (8192, getBufferCapacityInFrames (true))),\\n              outputStreamSampleBuffer (numOutputChannels, jmax (8192, getBufferCapacityInFrames (false)))\"],[\"            const SpinLock::ScopedTryLockType lock { audioCallbackMutex };\\n\\n            if (lock.isLocked())\",\"            if (stream == nullptr || audioData == nullptr || numFrames <= 0)\\n                return oboe::DataCallbackResult::Stop;\\n\\n            // Every early return must deliver deterministic silence, not stale output.\\n            auto silence = [&]\\n            {\\n                std::fill_n (static_cast<SampleType*> (audioData),\\n                             static_cast<size_t> (numFrames) * static_cast<size_t> (stream->getChannelCount()),\\n                             SampleType{});\\n            };\\n            const SpinLock::ScopedTryLockType lock { audioCallbackMutex };\\n\\n            if (! lock.isLocked())\\n            {\\n                silence();\\n                return oboe::DataCallbackResult::Continue;\\n            }\\n\\n            if (lock.isLocked())\"],[\"                const auto expandedBufferSize = jmax (inputStreamNativeBuffer.size(),\\n                                                      static_cast<size_t> (numInputChannels * jmax (bufferSize, numFrames)));\\n                inputStreamNativeBuffer.resize (expandedBufferSize);\",\"                const auto inputElements = static_cast<size_t> (numInputChannels) * static_cast<size_t> (numFrames);\\n                if (inputElements > inputStreamNativeBuffer.size()\\n                    || numFrames > inputStreamSampleBuffer.getNumSamples()\\n                    || numFrames > outputStreamSampleBuffer.getNumSamples())\\n                {\\n                    silence();\\n                    return oboe::DataCallbackResult::Continue;\\n                }\\n\\n                // The planar buffers stay owned and preallocated. A short or failed\\n                // input read must never expose old samples or a shorter referenced buffer.\\n                inputStreamSampleBuffer.clear (0, numFrames);\"],[\"                        jassertfalse;\\n                        return oboe::DataCallbackResult::Continue;\",\"                        jassertfalse;\\n                        silence();\\n                        return oboe::DataCallbackResult::Continue;\"],[\"                    if (result)\\n                    {\\n                        auto referringDirectlyToOboeData = OboeAudioIODeviceBufferHelpers<SampleType>\\n                                                             ::referAudioBufferDirectlyToOboeIfPossible (inputStreamNativeBuffer.data(),\\n                                                                                                         inputStreamSampleBuffer,\\n                                                                                                         result.value());\\n\\n                        if (! referringDirectlyToOboeData)\\n                            OboeAudioIODeviceBufferHelpers<SampleType>::convertFromOboe (inputStreamNativeBuffer.data(), inputStreamSampleBuffer, result.value());\\n                    }\\n                    else\\n                    {\\n                        JUCE_OBOE_LOG (\\\"Failed to read from input stream: \\\" + getOboeString (result.error()));\\n                    }\",\"                    const auto received = result ? jlimit (0, numFrames, static_cast<int> (result.value())) : 0;\\n                    if (received > 0)\\n                        OboeAudioIODeviceBufferHelpers<SampleType>::convertFromOboe (\\n                            inputStreamNativeBuffer.data(), inputStreamSampleBuffer, received);\\n\\n                    // Fade only the boundary of a missing input tail/recovery, not\\n                    // the whole callback. This suppresses abrupt zero transitions.\\n                    if (received > 0 && inputWasShort)\\n                        inputStreamSampleBuffer.applyGainRamp (0, jmin (16, received), 0.0f, 1.0f);\\n                    if (received > 0 && received < numFrames)\\n                    {\\n                        const auto ramp = jmin (16, received);\\n                        inputStreamSampleBuffer.applyGainRamp (received - ramp, ramp, 1.0f, 0.0f);\\n                    }\\n                    inputWasShort = received < numFrames;\"],[\"                auto referringDirectlyToOboeData = OboeAudioIODeviceBufferHelpers<SampleType>\\n                                                     ::referAudioBufferDirectlyToOboeIfPossible (static_cast<SampleType*> (audioData),\\n                                                                                                 outputStreamSampleBuffer,\\n                                                                                                 numFrames);\\n\\n                if (! referringDirectlyToOboeData)\\n                    outputStreamSampleBuffer.clear();\",\"                outputStreamSampleBuffer.clear (0, numFrames);\"],[\"                if (! referringDirectlyToOboeData)\\n                    OboeAudioIODeviceBufferHelpers<SampleType>::convertToOboe (outputStreamSampleBuffer, static_cast<SampleType*> (audioData), numFrames);\",\"                OboeAudioIODeviceBufferHelpers<SampleType>::convertToOboe (\\n                    outputStreamSampleBuffer, static_cast<SampleType*> (audioData), numFrames);\"],[\"        std::vector<SampleType> inputStreamNativeBuffer;\",\"        bool inputWasShort = true;\\n        std::vector<SampleType> inputStreamNativeBuffer;\"]]")
+MANAGER_EDITS = json.loads("[[\"    if (bufferSize > 0 && currentAudioDevice->getAvailableBufferSizes().contains (bufferSize))\",\"    // APEX: Oboe negotiates the queue size itself. Enumeration is advisory;\\n    // a previously negotiated non-ladder size must not revert to the default.\\n    if (currentAudioDevice->getTypeName().containsIgnoreCase (\\\"Oboe\\\")\\n        && bufferSize > 0 && bufferSize <= 32768)\\n        return bufferSize;\\n\\n    if (bufferSize > 0 && currentAudioDevice->getAvailableBufferSizes().contains (bufferSize))\"]]")
 
-        int getInitialOutputBufferSize() const
-        {
-            if (outputStream != nullptr && outputStream->openedOk())
-                if (auto stream = outputStream->getNativeStream())
-                    return stream->getBufferSizeInFrames();
-
-            return 0;
-        }"""
-        ),
-    ]
+def patch(source, edits):
     for before, after in edits:
         if source.count(before) != 1:
-            raise SystemExit("Unexpected JUCE Oboe source; refusing ambiguous patch")
+            raise SystemExit("Unexpected JUCE source; refusing ambiguous patch: " + before[:100])
         source = source.replace(before, after)
     return source
 
 if __name__ == "__main__":
-    path = Path(sys.argv[1]) / "modules/juce_audio_devices/native/juce_Oboe_android.cpp"
-    original = path.read_text(encoding="utf-8")
-    if "// APEX experimental requests:" not in original:
-        path.write_text(patch(original), encoding="utf-8")
-    print("APEX Oboe trial buffer requests enabled")
+    root = Path(sys.argv[1]) / "modules/juce_audio_devices"
+    targets = [
+        (root / "native/juce_Oboe_android.cpp", OBOE_EDITS),
+        (root / "audio_io/juce_AudioDeviceManager.cpp", MANAGER_EDITS),
+    ]
+    changes = []
+    for path, edits in targets:
+        source = path.read_text(encoding="utf-8")
+        if all(after in source for _, after in edits):
+            continue
+        changes.append((path, patch(source, edits)))
+    for path, source in changes:
+        path.write_text(source, encoding="utf-8")
+    print("APEX Oboe negotiated buffers and callback hardening enabled")

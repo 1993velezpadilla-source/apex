@@ -809,8 +809,9 @@ private:
         {
             const auto requested = juce::String(request.bufferSize);
             const auto negotiated = juce::String(activeBuffer);
-            statusLabel_.setText("Oboe buffer: requested " + requested + ", opened " + negotiated + " samples"
-                + (activeBuffer != request.bufferSize ? juce::String(" (adjusted by Android)") : juce::String()),
+            statusLabel_.setText("Oboe: " + juce::String(juce::roundToInt(activeRate)) + " Hz / requested "
+                + requested + ", opened " + negotiated + " samples"
+                + (activeBuffer != request.bufferSize ? juce::String(" (safe negotiated size)") : juce::String()),
                 juce::dontSendNotification);
         }
         applyButton_.setButtonText("Apply");
