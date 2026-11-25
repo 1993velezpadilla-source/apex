@@ -8,6 +8,7 @@ on:
       - "feature/mobile-portrait-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
+      - "Android/scripts/enable_oboe_low_buffer_requests.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
       - "Android/scripts/configure_android_frame_tiles.py"
       - "Android/scripts/pin_full_exporter_ndk.py"
@@ -76,6 +77,7 @@ jobs:
           mkdir -p third_party
           git clone --quiet --depth 1 --branch 8.0.12 \
             https://github.com/juce-framework/JUCE.git third_party/JUCE
+          python3 Android/scripts/enable_oboe_low_buffer_requests.py third_party/JUCE
 
       - name: Restore pinned JUCE Projucer cache
         id: projucer-cache

@@ -240,7 +240,8 @@ public:
             // user's chosen device alive output-only instead of failing the
             // whole commit - the input watchdog and record preflight surface
             // the input problem without killing playback.
-            if (setup.inputDeviceName.isNotEmpty())
+            if (setup.inputDeviceName.isNotEmpty()
+                && !(r.typeName.containsIgnoreCase("Oboe") && r.bufferSize < 192))
             {
                 DBG("[DeviceSession] combined open failed: " + error
                     + " - retrying output-only");
