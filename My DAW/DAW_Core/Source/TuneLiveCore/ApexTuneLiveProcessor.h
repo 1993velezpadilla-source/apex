@@ -115,6 +115,7 @@ public:
         setRateAndBufferSizeDetails(rate,block);
         int latency = 0;
         if (tracking_) {
+            tracking_->setVoicedReplacement(true);
             tracking_->prepare(rate, channels);
             tracking_->setResearchPhaseSlew(param(kExperimentalDeclick) >= 0.5f);
             latency = tracking_->latencySamples();

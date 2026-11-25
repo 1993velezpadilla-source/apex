@@ -119,6 +119,64 @@ bool testMobileCallbackPartition()
     return true;
 }
 
+
+// Reproduce the reported C# major / Hard Tune / 100% Wet case. An
+// independent tone projection measures leaked source F0, not just the
+// detector's estimate of the loudest output note.
+double toneProjection(const std::vector<float>& audio,int rate,double hz)
+{
+    double re=0.0,im=0.0,weight=0.0;
+    const int start=rate/2, count=static_cast<int>(audio.size())-start;
+    for(int i=0;i<count;++i)
+    {
+        const double w=0.5-0.5*std::cos(tau*i/(count-1));
+        const double phase=tau*hz*(start+i)/rate;
+        re+=w*audio[static_cast<std::size_t>(start+i)]*std::cos(phase);
+        im+=w*audio[static_cast<std::size_t>(start+i)]*std::sin(phase);
+        weight+=w;
+    }
+    return 2.0*std::hypot(re,im)/weight;
+}
+bool testVoicedReplacement()
+{
+    bool ok=true;
+    for(int rate : {44100,48000,96000})
+    {
+        const double source=252.0, target=261.6255653;
+        auto dry=makeVoice(rate,source,rate*2);
+        auto legacy=dry, tuned=dry, bypass=dry;
+        RealtimeCore reference,candidate,neutral;
+        reference.prepare(rate,1);
+        candidate.setVoicedReplacement(true);
+        candidate.prepare(rate,1);
+        neutral.setVoicedReplacement(true);
+        neutral.prepare(rate,1);
+        auto settings=hardTune();
+        settings.key=1; settings.scale=1; settings.wet=1.0f;
+        run(reference,legacy,settings,96);
+        run(candidate,tuned,settings,96);
+        settings.bypass=true;
+        run(neutral,bypass,settings,96);
+        const double oldLeak=toneProjection(legacy,rate,source);
+        const double newLeak=toneProjection(tuned,rate,source);
+        const double corrected=toneProjection(tuned,rate,target);
+        double peak=0.0;
+        for(float sample:tuned)
+        {
+            if(!std::isfinite(sample))return false;
+            peak=std::max(peak,std::abs(double(sample)));
+        }
+        std::cout<<"VOICED_REPLACEMENT rate="<<rate<<" legacy_source_f0="<<oldLeak
+                 <<" replacement_source_f0="<<newLeak<<" corrected_f0="<<corrected
+                 <<" peak="<<peak<<"\n";
+        // Do not accept reduced dry simply by silencing the voice. Also
+        // preserve exact dry bypass and reject unexpected signal peaks.
+        ok=ok && newLeak<=oldLeak+0.002 && newLeak<0.25*corrected
+              && corrected>0.10 && peak<0.8 && bypass==dry;
+    }
+    return ok;
+}
+
 // Independent measurement on emitted PCM within the expected tone's range.
 double measuredCents(const std::vector<float>& audio, int rate, double target) {
     const double expectedLag = static_cast<double>(rate) / target;
@@ -622,6 +680,7 @@ bool testDetectorDropoutStability(bool research=false) {
 
 int main() {
     if (!testMobileCallbackPartition()) return 1;
+    if (!testVoicedReplacement()) { std::cerr<<"Full wet source-F0 leakage or bypass regression\n"; return 19; }
     if (!testPitchAndOnset()) { std::cerr << "Tracking output pitch or onset\n"; return 1; }
     if (!testFastestRetune()) { std::cerr << "Fastest retune time after a detected target\n"; return 6; }
     if (!testBypassAtBankRelease()) { std::cerr << "Bypass truncated outgoing correction fade\\n"; return 9; }

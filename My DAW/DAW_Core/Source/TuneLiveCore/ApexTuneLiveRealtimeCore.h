@@ -29,6 +29,11 @@ public:
         formantStep_ = 1.0 / (0.003 * rate_ + 1.0);
         partialWeightStep_ = 1.0 / (0.0015 * rate_ + 1.0);
         agreementStep_ = 1.0 / (0.00030 * rate_ + 1.0);
+        // A voiced-only residual crossover, not a delay line. Suppresses
+        // uncancelled low harmonics while retaining high-frequency breath.
+        residualLowStep_ = -std::expm1(-kTau * 2400.0 / rate_);
+        replacementAttack_ = 1.0 / (0.006 * rate_ + 1.0);
+        replacementRelease_ = 1.0 / (0.001 * rate_ + 1.0);
         // Short detector gaps must fade correction but preserve the fitted
         // waveform. An immediate bank tear-down on every missed 1-ms hop
         // clicks on breathy syllables and vowel/consonant transitions.
@@ -68,6 +73,10 @@ public:
         waveformReleaseCount_ = 0;
         frequency_ = 0.0f;
     }
+
+    // Set before prepare in the native shipping host; legacy algorithm is
+    // retained as an independent A/B reference in the portable tests.
+    void setVoicedReplacement(bool enabled) noexcept { voicedReplacement_ = enabled; }
 
     static constexpr int latencySamples() noexcept { return 0; }
     float frequencyHz() const noexcept { return frequency_; }
@@ -183,7 +192,9 @@ public:
             else if (neutralLeft_ > 0)
                 --neutralLeft_;
             const bool correcting = bank_.size > 0 && neutralLeft_ > 0 && policy.correction > 0.0f;
-            const double wetTarget = correcting ? confidence_ * mix : 0.0;
+            const double voicedConfidence = voicedReplacement_
+                ? std::min(1.0, confidence_ / 0.75) : confidence_;
+            const double wetTarget = correcting ? voicedConfidence * mix : 0.0;
             const double wetStep = fastest && wetTarget > wet_ ? fastWetStep_ : wetStep_;
             wet_ += wetStep * (wetTarget - wet_);
             if (wet_ < 1.0e-10)
@@ -246,15 +257,16 @@ public:
                 // time: a normal harmonic has a larger derivative per
                 // sample. Preserve the calibrated thresholds at 44.1 kHz
                 // and above, but do not flatten legitimate low-rate PCM.
-                const double slopeScale = researchPhaseSlew_
+                const bool guarded = researchPhaseSlew_ || voicedReplacement_;
+                const double slopeScale = guarded
                     ? std::max(1.0, 44100.0 / rate_) : 1.0;
                 const double maxCorrectionStep = slopeScale *
-                    (researchPhaseSlew_ && (weakModel || outgoingTransition)
+                    (guarded && (weakModel || outgoingTransition)
                         ? 0.034 : 0.18);
                 double correction = std::clamp(
                     delta[channel], lastCorrection_[channel] - maxCorrectionStep,
                     lastCorrection_[channel] + maxCorrectionStep);
-                if (researchPhaseSlew_)
+                if (guarded)
                 {
                     // The original waveform's instantaneous derivative is
                     // our protection for authentic sharp consonants and
@@ -279,7 +291,7 @@ public:
                 }
                 data[c][i] = static_cast<float>(std::clamp(input[channel] + correction, -8.0, 8.0));
                 lastCorrection_[channel] = static_cast<double>(data[c][i]) - input[channel];
-                if (researchPhaseSlew_)
+                if (guarded)
                     lastDry_[channel] = input[channel];
             }
         }
@@ -309,6 +321,7 @@ private:
         std::array<double, kPartials> gain{}, targetGain{}, weight{}, targetWeight{};
         Phase source, destination, sourceStep, destinationStep;
         Sample residualPower{}, correctionGain{1.0, 1.0};
+        Sample residualLow{}, replacementGain{};
         double hz = 0.0, ratio = 1.0, learningStep = 0.0;
         int size = 0;
     };
@@ -625,6 +638,23 @@ private:
             constexpr double transitionWidth = 0.45;
             const double fade = std::clamp((mismatch - tolerance) / transitionWidth, 0.0, 1.0);
             const double requestedGain = 1.0 - fade * fade * (3.0 - 2.0 * fade);
+            if (voicedReplacement_)
+            {
+                // Dry+delta leaves the unmatched source F0 in the output.
+                // On a stable voiced frame remove the low-frequency part
+                // of that residual. On a consonant or pitch loss, smoothly
+                // disable this path and pass the original transient.
+                auto& low = bank_.residualLow[channel];
+                low += residualLowStep_ * (residual - low);
+                auto& replacement = bank_.replacementGain[channel];
+                const double target = confidence_ >= 0.45
+                    ? requestedGain * std::clamp((confidence_ - 0.45) / 0.30, 0.0, 1.0)
+                    : 0.0;
+                replacement += (target > replacement ? replacementAttack_ : replacementRelease_)
+                    * (target - replacement);
+                // wet_ already contains the user mix, including bypass.
+                delta[channel] -= wet_ * replacement * low;
+            }
             auto& correctionGain = bank_.correctionGain[channel];
             // Keep protective attenuation immediate: slowing the attack
             // created oversized peaks on abrupt real note transitions.
@@ -711,6 +741,7 @@ private:
     Sample envelope_{}, lastCorrection_{}, lastDry_{}, releaseOffset_{};
     double rate_ = 48000.0, inputLevelStep_ = 0.0, wetStep_ = 0.0, formantStep_ = 0.0, agreementStep_ = 0.0;
     double correctionRestoreStep_ = 0.0, partialWeightStep_ = 0.0;
+    double residualLowStep_ = 0.0, replacementAttack_ = 0.0, replacementRelease_ = 0.0;
     double phaseSlewStep_ = 0.0, phaseHz_ = 0.0;
     double targetShift_ = 0.0, shift_ = 0.0, confidence_ = 0.0, wet_ = 0.0;
     double retuneStep_ = 0.0, releaseAmount_ = 0.0;
@@ -724,6 +755,7 @@ private:
     int unvoicedHoldHops_ = 2, missingPitchHops_ = 0, postDropoutGuardHops_ = 0;
     unsigned waveformReleaseCount_ = 0;
     bool prepared_ = false;
+    bool voicedReplacement_ = false;
     bool researchPhaseSlew_ = false;
     bool requestedResearchPhaseSlew_ = false;
 };
