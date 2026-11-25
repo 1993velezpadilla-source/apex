@@ -679,13 +679,14 @@ private:
                 const double priorLow = low;
                 low += residualLowStep_ * (residual - low);
                 auto& replacement = bank_.replacementGain[channel];
+                const double priorReplacement = replacement;
                 const double target = confidence_ >= 0.45
                     ? requestedGain * std::clamp((confidence_ - 0.45) / 0.30, 0.0, 1.0)
                     : 0.0;
                 replacement += (target > replacement ? replacementAttack_ : replacementRelease_)
                     * (target - replacement);
                 // wet_ already contains the user mix, including bypass.
-                delta[channel] -= wet_ * replacement * priorLow;
+                delta[channel] -= wet_ * priorReplacement * priorLow;
             }
             auto& correctionGain = bank_.correctionGain[channel];
             // Keep protective attenuation immediate: slowing the attack
