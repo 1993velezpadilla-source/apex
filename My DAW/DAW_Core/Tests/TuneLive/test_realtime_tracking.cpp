@@ -205,7 +205,7 @@ double measuredCents(const std::vector<float>& audio, int rate, double target) {
     return 1200.0 * std::log2(expectedLag / (bestLag + fraction));
 }
 
-bool testPitchAndOnset(bool research=false) {
+bool testPitchAndOnset(bool research=false, bool replacement=false) {
     const auto settings = hardTune();
     for (const int rate : {44100, 48000, 96000, 192000}) {
         constexpr std::array<double, 5> notes{65.4063913, 110.0, 195.997718, 440.0, 830.609395};
@@ -215,7 +215,8 @@ bool testPitchAndOnset(bool research=false) {
             const auto dry = makeVoice(rate, target * std::exp2(offsets[note] / 1200.0), rate);
             auto wet = dry;
             RealtimeCore engine;
-            engine.prepare(rate, 1);
+            engine.setVoicedReplacement(replacement);
+    engine.prepare(rate, 1);
         engine.setResearchPhaseSlew(research);
             run(engine, wet, settings, 127);
             int changed = 0;
@@ -233,7 +234,7 @@ bool testPitchAndOnset(bool research=false) {
     return true;
 }
 
-bool testFastestRetune(bool research=false) {
+bool testFastestRetune(bool research=false, bool replacement=false) {
     const auto original = hardTune();
     const auto processSample = [](RealtimeCore& engine, float sample, const DspSettings& settings) {
         float* channels[]{&sample};
@@ -249,9 +250,11 @@ bool testFastestRetune(bool research=false) {
             const auto dry = makeVoice(rate, note * std::exp2(32.0 / 1200.0), rate / 8);
             auto settings = original;
             RealtimeCore tuning, unchanged;
-            tuning.prepare(rate, 1);
+            tuning.setVoicedReplacement(replacement);
+    tuning.prepare(rate, 1);
         tuning.setResearchPhaseSlew(research);
-            unchanged.prepare(rate, 1);
+            unchanged.setVoicedReplacement(replacement);
+    unchanged.prepare(rate, 1);
         unchanged.setResearchPhaseSlew(research);
             int acquired = -1, retarget = -1;
             int accepted = -1, applied = -1, changed = -1;
@@ -301,7 +304,7 @@ bool testFastestRetune(bool research=false) {
     return cases == 50;
 }
 
-bool testNoteTransitions(bool research=false) {
+bool testNoteTransitions(bool research=false, bool replacement=false) {
     constexpr int rate = 48000;
     constexpr int transition = rate * 2 / 5;
     constexpr int length = transition + rate / 8;
@@ -311,6 +314,7 @@ bool testNoteTransitions(bool research=false) {
     }};
     const auto settings = hardTune();
     RealtimeCore engine;
+    engine.setVoicedReplacement(replacement);
     engine.prepare(rate, 1);
         engine.setResearchPhaseSlew(research);
     std::vector<float> dry(length);
@@ -419,7 +423,7 @@ bool testBypassAtBankRelease() {
     return exercised>0 && worst<2e-6;
 }
 
-bool testTimelineAndReset(bool research=false) {
+bool testTimelineAndReset(bool research=false, bool replacement=false) {
     constexpr int rate = 48000;
     constexpr int impulsePosition = 14399;
     const auto settings = hardTune();
@@ -427,10 +431,13 @@ bool testTimelineAndReset(bool research=false) {
     auto a = dry, b = dry, hit = dry;
     hit[impulsePosition] += 0.11f;
     RealtimeCore fixed, alternate, transient;
+    fixed.setVoicedReplacement(replacement);
     fixed.prepare(rate, 1);
         fixed.setResearchPhaseSlew(research);
+    alternate.setVoicedReplacement(replacement);
     alternate.prepare(rate, 1);
         alternate.setResearchPhaseSlew(research);
+    transient.setVoicedReplacement(replacement);
     transient.prepare(rate, 1);
         transient.setResearchPhaseSlew(research);
     run(fixed, a, settings, 128);
@@ -454,7 +461,7 @@ bool testTimelineAndReset(bool research=false) {
     return a == b;
 }
 
-bool testVibrato(bool research=false) {
+bool testVibrato(bool research=false, bool replacement=false) {
     constexpr int rate = 48000;
     auto plain = hardTune(), preserve = plain;
     plain.stability = preserve.stability = 0.8f;
@@ -469,6 +476,7 @@ bool testVibrato(bool research=false) {
     }
     auto hard = dry, expressive = dry;
     RealtimeCore engine;
+    engine.setVoicedReplacement(replacement);
     engine.prepare(rate, 1);
         engine.setResearchPhaseSlew(research);
     run(engine, hard, plain, 128);
@@ -498,14 +506,15 @@ bool testVibrato(bool research=false) {
            && natural[1] > 1.7 * fixed[1] && std::abs(natural[0]) < 10.0;
 }
 
-bool testRealtimeSafety(bool research=false) {
+bool testRealtimeSafety(bool research=false, bool replacement=false) {
     constexpr int rate = 48000, block = 128, inserts = 8, blocks = 375;
     const auto source = makeVoice(rate, 113.1, block * blocks);
     std::array<RealtimeCore, inserts> engines;
     std::array<double, blocks> times{};
     bool clean = true;
     for (auto& engine : engines) {
-        engine.prepare(rate, 2);
+        engine.setVoicedReplacement(replacement);
+    engine.prepare(rate, 2);
         engine.setResearchPhaseSlew(research);
     }
     auto settings = hardTune();
@@ -631,7 +640,7 @@ bool testExperimentalToggleDefersUntilUnvoiced() {
     return !engine.researchPhaseSlewEnabledForTest();
 }
 
-bool testDetectorDropoutStability(bool research=false) {
+bool testDetectorDropoutStability(bool research=false, bool replacement=false) {
     constexpr int rate = 48000;
     auto dry = makeVoice(rate, 447.691, rate * 2);
     // Airy singing: a brief 8-ms unvoiced hole followed by a later real
@@ -642,6 +651,7 @@ bool testDetectorDropoutStability(bool research=false) {
     std::fill(dry.begin() + longBegin, dry.begin() + longEnd, 0.0f);
     auto wet = dry;
     RealtimeCore engine;
+    engine.setVoicedReplacement(replacement);
     engine.prepare(rate, 1);
         engine.setResearchPhaseSlew(research);
     const auto settings = hardTune();
@@ -700,5 +710,17 @@ int main() {
     if (!testNoteTransitions(true)) { std::cerr<<"Phase mode note transitions\\n"; return 16; }
     if (!testDetectorDropoutStability(true)) { std::cerr<<"Phase mode dropout\\n"; return 17; }
     std::cout<<"PHASE_MODE_EXTENDED_REGRESSION_PASS\\n";
+    // The native shipping processor enables voiced replacement. Exercise
+    // that exact mode, not only the historical comparison engine.
+    std::cout<<"SHIPPING_REPLACEMENT_EXTENDED_BEGIN\n";
+    if (!testPitchAndOnset(false,true)) return 20;
+    if (!testFastestRetune(false,true)) return 21;
+    if (!testTimelineAndReset(false,true)) return 22;
+    if (!testRealtimeSafety(false,true)) return 23;
+    if (!testVibrato(false,true)) return 24;
+    if (!testNoteTransitions(false,true)) return 25;
+    if (!testDetectorDropoutStability(false,true)) return 26;
+    std::cout<<"SHIPPING_REPLACEMENT_EXTENDED_PASS\n";
+
     if (!testExperimentalToggleDefersUntilUnvoiced()) { std::cerr << "Experimental A/B mode switch must wait for silence\n"; return 8; }
 }
