@@ -34,5 +34,14 @@ int main()
     assert(chunks.size() == 5);
     assert(chunks[0].second == 256);
     assert(chunks[4].first == 1024 && chunks[4].second == 1);
+    // A graph prepared for a 512-frame maximum must dispatch one native
+    // callback without artificial splitting, even with a 32/96-frame queue.
+    for (int n : {32,48,64,96,128,160,192,256,384,512})
+    {
+        run(n,512);
+        assert(chunks.size()==1 && chunks.front().second==n);
+    }
+    run(960,512);
+    assert(chunks.size()==2 && chunks[1].first==512 && chunks[1].second==448);
     return 0;
 }

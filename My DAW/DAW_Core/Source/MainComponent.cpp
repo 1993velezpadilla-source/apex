@@ -8274,7 +8274,10 @@ void MainComponent::audioDeviceIOCallbackWithContext(const float* const* inputCh
         rec.sequence = callbackAuditSequence_++;
         rec.startTicks = auditStartTicks;
         rec.durationTicks = auditEndTicks - auditStartTicks;
-        rec.periodTicks = callbackAuditPeriodTicks_;
+        // Use the delivered quantum, not the prepared graph capacity or
+        // requested Oboe queue depth, for the deadline of this callback.
+        rec.periodTicks = computeCallbackPeriodTicks(numSamples, appCore_.getCurrentSampleRate(),
+            static_cast<double>(juce::Time::getHighResolutionTicksPerSecond()));
         // Measured start-to-start interval: distinguishes "APEX exceeded the
         // deadline" from "the driver/OS delivered this callback late".
         rec.intervalTicks = callbackAuditPrevStartTicks_ != 0
@@ -8283,7 +8286,7 @@ void MainComponent::audioDeviceIOCallbackWithContext(const float* const* inputCh
         callbackAuditPrevStartTicks_ = auditStartTicks;
         rec.numSamples = numSamples;
         rec.streamGeneration = callbackAuditStreamGeneration_;
-        rec.deadlineMiss = (callbackAuditPeriodTicks_ > 0 && rec.durationTicks > callbackAuditPeriodTicks_) ? 1 : 0;
+        rec.deadlineMiss = (rec.periodTicks > 0 && rec.durationTicks > rec.periodTicks) ? 1 : 0;
         // Stage breakdown + spike context captured inside getNextAudioBlock.
         const auto& telemetry = appCore_.getCallbackStageTelemetry();
         rec.stageTicks = telemetry.stageTicks;
@@ -8305,6 +8308,13 @@ void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice* device)
     preparation.blockSize = device != nullptr
         ? juce::jmax(1, device->getCurrentBufferSizeSamples()) : 1;
     preparation.sampleRate = device != nullptr ? device->getCurrentSampleRate() : 44100.0;
+   #if JUCE_ANDROID
+    // Oboe's queue size is not its callback quantum. Preparing a tiny graph
+    // maximum (e.g. 32/96) forces one native callback through many graph
+    // dispatches. Reserve headroom without delaying or accumulating samples.
+    if (device != nullptr && device->getTypeName().containsIgnoreCase("Oboe"))
+        preparation.blockSize = juce::jmax(512, preparation.blockSize);
+   #endif
     preparation.valid = true;
 
     if (audioResourceReleaseState_.isExportOwned())

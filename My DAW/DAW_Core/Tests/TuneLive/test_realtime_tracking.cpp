@@ -68,6 +68,57 @@ void run(RealtimeCore& engine, std::vector<float>& audio, const DspSettings& set
     }
 }
 
+
+// Compare the same input under mobile-sized and irregular host callbacks.
+// Changes in key/mix/retune are aligned to the same sample clock.
+bool testMobileCallbackPartition()
+{
+    constexpr std::array<int, 9> blocks{{32,48,64,96,128,160,192,256,512}};
+    for (const int rate : {44100,48000,96000})
+    {
+        const int length = rate / 2;
+        auto dry = makeVoice(rate, 228.0, length);
+        for (int i = rate / 5; i < rate / 5 + rate / 100; ++i)
+            dry[static_cast<std::size_t>(i)] = 0.0f;
+        auto baseline = dry;
+        auto candidate = dry;
+        RealtimeCore fixed, varied;
+        fixed.prepare(rate,1);
+        varied.prepare(rate,1);
+        auto settings = hardTune();
+        std::size_t index = 0;
+        const int checkpoint = rate / 10;
+        for (int start = 0; start < length; start += checkpoint)
+        {
+            const int end = std::min(length,start+checkpoint);
+            settings.key = start < rate/5 ? 0 : 9;
+            settings.scale = 1;
+            settings.wet = start < rate/4 ? 1.0f : 0.65f;
+            settings.retune = start < rate/5 ? 0.0f : 0.2f;
+            float* a[]{baseline.data()+start};
+            fixed.process(a,1,end-start,settings);
+            for (int pos=start; pos<end;)
+            {
+                const int count=std::min(end-pos,blocks[index++%blocks.size()]);
+                float* b[]{candidate.data()+pos};
+                varied.process(b,1,count,settings);
+                pos+=count;
+            }
+        }
+        double peakDifference=0.0;
+        for(int i=0;i<length;++i)
+        {
+            if(!std::isfinite(baseline[i]) || !std::isfinite(candidate[i]))
+                return false;
+            peakDifference=std::max(peakDifference,std::abs(double(baseline[i])-candidate[i]));
+        }
+        std::cout<<"TRACKING_MOBILE_PARTITION rate="<<rate<<" peak_diff="<<peakDifference<<"\n";
+        if(peakDifference>1.0e-5 || fixed.latencySamples()!=0 || varied.latencySamples()!=0)
+            return false;
+    }
+    return true;
+}
+
 // Independent measurement on emitted PCM within the expected tone's range.
 double measuredCents(const std::vector<float>& audio, int rate, double target) {
     const double expectedLag = static_cast<double>(rate) / target;
@@ -570,6 +621,7 @@ bool testDetectorDropoutStability(bool research=false) {
 } // namespace
 
 int main() {
+    if (!testMobileCallbackPartition()) return 1;
     if (!testPitchAndOnset()) { std::cerr << "Tracking output pitch or onset\n"; return 1; }
     if (!testFastestRetune()) { std::cerr << "Fastest retune time after a detected target\n"; return 6; }
     if (!testBypassAtBankRelease()) { std::cerr << "Bypass truncated outgoing correction fade\\n"; return 9; }
