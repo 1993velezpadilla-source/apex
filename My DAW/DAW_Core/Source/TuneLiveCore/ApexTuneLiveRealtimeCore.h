@@ -323,7 +323,7 @@ private:
         Sample residualPower{}, correctionGain{1.0, 1.0};
         Sample residualLow{}, replacementGain{};
         double hz = 0.0, ratio = 1.0, learningStep = 0.0;
-        int size = 0;
+        int size = 0, activeSize = 0;
     };
 
     void applyPendingResearchMode() noexcept
@@ -439,6 +439,7 @@ private:
             postDropoutGuardHops_ = 0;
         const bool onset = bank_.size == 0;
         const int priorSize = bank_.size;
+        const int priorActiveSize = bank_.activeSize;
         frequency_ = pitch.hz;
         bank_.hz = pitch.hz;
         const bool newShift = onset || targetShift_ != decision.shiftSemitones;
@@ -457,10 +458,30 @@ private:
         }
         confidence_ = std::clamp((pitch.confidence - 0.77) / 0.19, 0.0, 1.0);
         const double safeBand = std::min(6000.0, rate_ * 0.44);
-        bank_.size = std::clamp(static_cast<int>(safeBand / bank_.hz), 1, kPartials);
-        for (int h = bank_.size; h < priorSize; ++h)
-            for (auto& channel : bank_.partials)
-                channel[static_cast<std::size_t>(h)] = {};
+        const int desiredSize = std::clamp(static_cast<int>(safeBand / bank_.hz), 1, kPartials);
+        bank_.activeSize = desiredSize;
+        if (voicedReplacement_)
+        {
+            // Birth/death of harmonic tracks must be gain-ramped. Dropping
+            // an active coefficient at a pitch-estimator hop creates a
+            // broadband discontinuity even when oscillator phase is continuous.
+            bank_.size = std::max(priorSize, desiredSize);
+            while (bank_.size > desiredSize &&
+                   bank_.weight[static_cast<std::size_t>(bank_.size - 1)] < 1.0e-5)
+            {
+                const auto bin = static_cast<std::size_t>(--bank_.size);
+                for (auto& channel : bank_.partials) channel[bin] = {};
+                bank_.weight[bin] = 0.0;
+                bank_.targetWeight[bin] = 0.0;
+            }
+        }
+        else
+        {
+            bank_.size = desiredSize;
+            for (int h = bank_.size; h < priorSize; ++h)
+                for (auto& channel : bank_.partials)
+                    channel[static_cast<std::size_t>(h)] = {};
+        }
         for (int h = 0; h < bank_.size; ++h)
         {
             const auto bin = static_cast<std::size_t>(h);
@@ -468,7 +489,8 @@ private:
             // with the wideband consonant residual or approach Nyquist.
             const double taper = std::clamp((safeBand - (h + 1) * bank_.hz) / (0.34 * safeBand),
                                            0.0, 1.0);
-            bank_.targetWeight[bin] = taper * taper * (3.0 - 2.0 * taper);
+            bank_.targetWeight[bin] = h < desiredSize
+                ? taper * taper * (3.0 - 2.0 * taper) : 0.0;
             if (h >= priorSize)
             {
                 bank_.gain[bin] = 1.0;
@@ -476,6 +498,11 @@ private:
                 // Partials added during a glide must fade in independently.
                 bank_.weight[bin] = onset ? bank_.targetWeight[bin] : 0.0;
             }
+            // Retiring bins keep their coefficients until inaudible; if a
+            // glide brings them back they resume from their current weight.
+            if (voicedReplacement_ && h >= priorActiveSize && h < desiredSize
+                && h >= priorSize)
+                bank_.targetGain[bin] = 1.0;
         }
         // At the fastest retune setting, follow the measured source frequency
         // without a second 4-ms lag. The destination still uses the continuous
@@ -485,7 +512,7 @@ private:
             phaseHz_ = bank_.hz;
             bank_.sourceStep = Phase::rotate(kTau * bank_.hz / rate_);
         }
-        bank_.learningStep = std::min(2.2 * bank_.hz / rate_, 0.68 / bank_.size);
+        bank_.learningStep = std::min(2.2 * bank_.hz / rate_, 0.68 / std::max(1, bank_.activeSize));
         if (onset)
             initialiseWaveform();
         updateEnvelope(preserveFormants);
@@ -614,7 +641,8 @@ private:
                 const auto channel = static_cast<std::size_t>(c);
                 const auto& p = bank_.partials[channel][bin];
                 const double sourceValue = p.at(source);
-                predicted[channel] += sourceValue;
+                predicted[channel] += voicedReplacement_ && h >= bank_.activeSize
+                    ? weight * sourceValue : sourceValue;
                 correction[channel] += weight * (gain * p.at(destination) - sourceValue);
             }
             source = source * bank_.source;
@@ -645,6 +673,10 @@ private:
                 // of that residual. On a consonant or pitch loss, smoothly
                 // disable this path and pass the original transient.
                 auto& low = bank_.residualLow[channel];
+                // Use the prior residual estimate for this sample. A new
+                // consonant/impulse must pass immediately, not enter the
+                // cancellation path on the very sample it arrives.
+                const double priorLow = low;
                 low += residualLowStep_ * (residual - low);
                 auto& replacement = bank_.replacementGain[channel];
                 const double target = confidence_ >= 0.45
@@ -653,7 +685,7 @@ private:
                 replacement += (target > replacement ? replacementAttack_ : replacementRelease_)
                     * (target - replacement);
                 // wet_ already contains the user mix, including bypass.
-                delta[channel] -= wet_ * replacement * low;
+                delta[channel] -= wet_ * replacement * priorLow;
             }
             auto& correctionGain = bank_.correctionGain[channel];
             // Keep protective attenuation immediate: slowing the attack
@@ -667,6 +699,7 @@ private:
             {
                 const auto bin = static_cast<std::size_t>(h);
                 auto& p = bank_.partials[channel][bin];
+                if (voicedReplacement_ && h >= bank_.activeSize) continue;
                 p.real += error * basis[bin].real;
                 p.imag += error * basis[bin].imag;
             }
