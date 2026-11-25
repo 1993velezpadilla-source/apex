@@ -51,6 +51,29 @@ inline juce::Array<int> filterSupportedBufferSizes(const juce::Array<int>& devic
     return out;
 }
 
+/** Android Oboe advertises burst-aligned buffers (not a power-of-two
+    ladder) and route-specific rates. Keep all positive reported values;
+    do not manufacture capabilities or modify the desktop policy. */
+inline juce::Array<double> androidReportedSampleRates(const juce::Array<double>& deviceRates)
+{
+    juce::Array<double> out;
+    for (const auto rate : deviceRates)
+        if (std::isfinite (rate) && rate > 0.0 && std::floor (rate) == rate)
+            out.addIfNotAlreadyThere (rate);
+    out.sort();
+    return out;
+}
+
+inline juce::Array<int> androidReportedBufferSizes(const juce::Array<int>& deviceSizes)
+{
+    juce::Array<int> out;
+    for (const auto size : deviceSizes)
+        if (size > 0)
+            out.addIfNotAlreadyThere (size);
+    out.sort();
+    return out;
+}
+
 /** 32 samples is EXPERIMENTAL_ULTRA_LOW_LATENCY until Apollo Solo hardware
     validation passes. It must only ever be offered when the driver reports it. */
 inline bool isExperimentalUltraLowLatency(int bufferSize) noexcept

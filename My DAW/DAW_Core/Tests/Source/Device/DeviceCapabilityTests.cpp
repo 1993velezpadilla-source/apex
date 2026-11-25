@@ -67,6 +67,31 @@ public:
             expect (DAW::DeviceCapability::filterSupportedBufferSizes ({ 24, 8192 }).isEmpty());
         }
 
+        beginTest ("Oboe preserves native burst-aligned sizes and non-desktop rates");
+        {
+            const auto sizes = DAW::DeviceCapability::androidReportedBufferSizes (
+                { 1920, 384, 192, 768, 576, 384, 0, -1, 1536 });
+            const int expected[] = { 192, 384, 576, 768, 1536, 1920 };
+            expectEquals (sizes.size(), 6);
+            for (int i = 0; i < sizes.size() && i < 6; ++i)
+                expectEquals (sizes[i], expected[i]);
+
+            const auto rates = DAW::DeviceCapability::androidReportedSampleRates (
+                { 96000.0, 48000.0, 24000.0, 44100.0, 48000.0, 0.0, -1.0, 48000.5 });
+            const double expectedRates[] = { 24000.0, 44100.0, 48000.0, 96000.0 };
+            expectEquals (rates.size(), 4);
+            for (int i = 0; i < rates.size() && i < 4; ++i)
+                expectWithinAbsoluteError (rates[i], expectedRates[i], 0.001);
+            expect (DAW::DeviceCapability::androidReportedSampleRates ({}).isEmpty());
+            expect (DAW::DeviceCapability::androidReportedBufferSizes ({}).isEmpty());
+
+            const auto fixedRate = DAW::DeviceCapability::androidReportedSampleRates ({ 48000.0 });
+            expectEquals (fixedRate.size(), 1);
+            expect (DAW::DeviceCapability::checkAgainstSupportedConfig (48000.0, 192, fixedRate, sizes).ok);
+            expect (!DAW::DeviceCapability::checkAgainstSupportedConfig (44100.0, 192, fixedRate, sizes).ok);
+            expect (!DAW::DeviceCapability::checkAgainstSupportedConfig (48000.0, 128, fixedRate, sizes).ok);
+        }
+
         beginTest ("32 is the only experimental ultra-low-latency size and is labeled");
         {
             expect (DAW::DeviceCapability::isExperimentalUltraLowLatency (32));
