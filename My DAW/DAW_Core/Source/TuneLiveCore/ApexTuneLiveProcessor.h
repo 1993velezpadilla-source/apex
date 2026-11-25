@@ -61,10 +61,24 @@ public:
                  kHumanize, kNoteStability, kPreserveFormants, kFlexTune, kA4Reference,
                  kVocalRange, kVibratoPreserve, kExperimentalDeclick, kNumParams };
 
-    explicit Processor(Engine engine = Engine::Studio) : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
+    // Android field QA rejected the harmonic residual engine. Retain
+    // stable insert identity, but run a whole-signal pitch shifter there.
+    // Explicit override lets linked desktop tests exercise the same path.
+    static constexpr bool defaultSpectralTracking =
+   #if JUCE_ANDROID
+        true;
+   #else
+        false;
+   #endif
+    explicit Processor(Engine engine = Engine::Studio,
+                       bool useSpectralTracking = defaultSpectralTracking)
+        : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-        tracking_(engine == Engine::Tracking ? std::make_unique<RealtimeCore>() : nullptr) {
+        engine_(engine),
+        spectralTracking_(engine == Engine::Tracking && useSpectralTracking),
+        tracking_(engine == Engine::Tracking && !spectralTracking_
+                      ? std::make_unique<RealtimeCore>() : nullptr) {
         add(kAmount, "tunelive.amount", "Correction Amount", 0.85f);
         add(kSpeed, "tunelive.speed", "Retune Speed", 0.20f);
         add(kKey, "tunelive.key", "Key (C=0)", 0.0f, 12);
@@ -84,7 +98,8 @@ public:
         // promoted to the regular renderer without Android monitoring QA.
         add(kExperimentalDeclick, "tunelive.experimentalDeclick", "Anti-Click A/B Research", 0.0f, 2);
     }
-    bool isTracking() const noexcept { return tracking_ != nullptr; }
+    bool isTracking() const noexcept { return engine_ == Engine::Tracking; }
+    bool usesSpectralTracking() const noexcept { return spectralTracking_; }
     const juce::String getName() const override { return isTracking() ? kTrackingName : kPluginName; }
     static juce::PluginDescription descriptionFor(Engine engine) {
         const bool tracking = engine == Engine::Tracking;
@@ -120,7 +135,9 @@ public:
             tracking_->setResearchPhaseSlew(param(kExperimentalDeclick) >= 0.5f);
             latency = tracking_->latencySamples();
         } else {
-            dsp_.prepare(rate, block, channels);
+            dsp_.prepare(rate, block, channels, ShifterProfile::HighQuality40ms,
+                spectralTracking_ ? StudioControlClock::ResearchFixed1ms
+                                  : StudioControlClock::ApprovedHostChunks);
             latency = dsp_.latencySamples();
         }
         latencyForDisplay_.store(latency, std::memory_order_relaxed);
@@ -229,6 +246,8 @@ private:
     std::array<TuneLiveParameter*,kNumParams> params_{};
     // Engine choice is a stable native insert identity, fixed before prepare.
     DspCore dsp_;
+    const Engine engine_;
+    const bool spectralTracking_;
     const std::unique_ptr<RealtimeCore> tracking_;
     std::atomic<float> lastHz_{0.0f}, lastShift_{0.0f};
     std::atomic<int> latencyForDisplay_{0};

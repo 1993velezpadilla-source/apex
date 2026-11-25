@@ -156,6 +156,12 @@ public:
                              experimentalDeclick_.getToggleState()?1.0f:0.0f);
             };
             addAndMakeVisible(experimentalDeclick_);
+            if (processor_.usesSpectralTracking()) {
+                experimentalDeclick_.setEnabled(false);
+                experimentalDeclick_.setTooltip(
+                    "Not applicable to the whole-signal spectral engine. "
+                    "The stored research setting is retained for project compatibility.");
+            }
         }
 
         for(int i=0;i<3;++i) {
@@ -234,7 +240,8 @@ public:
                    254,23,350,43,juce::Justification::centredLeft);
         g.setColour(Visual::muted());
         g.setFont(juce::Font(juce::FontOptions(9.4f).withStyle("Bold")));
-        g.drawText(processor_.isTracking() ? "RECORDING & MONITORING" : "STUDIO CORRECTION",
+        g.drawText(processor_.usesSpectralTracking() ? "SPECTRAL CORRECTION"
+                   : (processor_.isTracking() ? "RECORDING & MONITORING" : "STUDIO CORRECTION"),
                    37,71,360,16,juce::Justification::centredLeft);
         // Decorative amplitude-free arc: NOT a fabricated live spectrum.
         for(int i=0;i<4;++i) {

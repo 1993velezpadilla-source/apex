@@ -75,7 +75,34 @@ int main() {
 
     // The new insert has its own fixed PDC and automatable range controls.
     using Tune = APEX::TuneLive::Processor;
-    Tune tracking(Tune::Engine::Tracking);
+    Tune tracking(Tune::Engine::Tracking, false);
+    // Exact engine selected by Android, exercised in this linked JUCE test.
+    Tune mobileTracking(Tune::Engine::Tracking, true);
+    mobileTracking.prepareToPlay(48000.0,128);
+    juce::PluginDescription mobileDesc;
+    mobileTracking.fillInPluginDescription(mobileDesc);
+    if (!mobileTracking.usesSpectralTracking() || !mobileTracking.isTracking()
+        || mobileDesc.fileOrIdentifier != Tune::kTrackingIdentifier
+        || mobileDesc.uniqueId != Tune::kTrackingUniqueId
+        || mobileTracking.getLatencySamples() != 1920)
+        return fail("Android spectral Tracking identity or PDC");
+    mobileTracking.getParameters()[Tune::kBypass]->setValueNotifyingHost(1.0f);
+    {
+        juce::MidiBuffer midi;
+        juce::AudioBuffer<float> samples(2,128);
+        for (int block=0;block<32;++block) {
+            for(int ch=0;ch<2;++ch)
+                for(int i=0;i<128;++i)
+                    samples.setSample(ch,i,(block==0 && i==0)?0.5f:0.0f);
+            mobileTracking.processBlock(samples,midi);
+            for(int ch=0;ch<2;++ch)
+                for(int i=0;i<128;++i) {
+                    const auto expected = block*128+i==1920 ? 0.5f : 0.0f;
+                    if(std::abs(samples.getSample(ch,i)-expected)>1.0e-6f)
+                        return fail("Android spectral Tracking bypass PDC mismatch");
+                }
+        }
+    }
     juce::PluginDescription trackingDescription;
     tracking.fillInPluginDescription(trackingDescription);
     tracking.prepareToPlay(48000.0,128);
