@@ -1,10 +1,11 @@
 name: Tune Live mobile latency frontier
 on:
   push:
-    branches: [feature/mobile-oboe-audio-options-20261125]
+    branches: [feature/mobile-oboe-audio-options-20261125, feature/mobile-portrait-oboe-latency18-20261126]
     paths:
       - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_mobile_latency_frontier.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_spectral_callback_budget.cpp'
       - '.github/workflows/apex-tune-live-latency-frontier.yml'
   workflow_dispatch:
 permissions:

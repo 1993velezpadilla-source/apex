@@ -84,7 +84,7 @@ int main() {
     if (!mobileTracking.usesSpectralTracking() || !mobileTracking.isTracking()
         || mobileDesc.fileOrIdentifier != Tune::kTrackingIdentifier
         || mobileDesc.uniqueId != Tune::kTrackingUniqueId
-        || mobileTracking.getLatencySamples() != 1080)
+        || mobileTracking.getLatencySamples() != 864)
         return fail("Android spectral Tracking identity or PDC");
     {
         std::unique_ptr<juce::AudioProcessorEditor> simple(mobileTracking.createEditor());
@@ -151,7 +151,7 @@ int main() {
             mobileTracking.processBlock(samples,midi);
             for(int ch=0;ch<2;++ch)
                 for(int i=0;i<128;++i) {
-                    const auto expected = block*128+i==1080 ? 0.5f : 0.0f;
+                    const auto expected = block*128+i==864 ? 0.5f : 0.0f;
                     if(std::abs(samples.getSample(ch,i)-expected)>1.0e-6f)
                         return fail("Android spectral Tracking bypass PDC mismatch");
                 }

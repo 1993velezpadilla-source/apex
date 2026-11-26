@@ -91,7 +91,7 @@ static bool testMobileSpectral()
                     <<" corrected_peak="<<corrected<<" corrected_peak_hz="<<peakHz
                     <<" rms="<<std::sqrt(energy/(2*rate))<<" peak="<<peak<<" max_step="<<maxStep
                     <<" PDC="<<latency<<" bypass="<<bypass<<" pass="<<pass<<"\n";
-                if(profile==ShifterProfile::Experimental18ms && split &&
+                if(profile==ShifterProfile::Experimental18ms && !split &&
                    clock==StudioControlClock::ResearchFixed1ms) allShipping &= pass;
             }
         }

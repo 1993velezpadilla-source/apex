@@ -95,5 +95,11 @@ int main(){
             for(int instances:{1,4,8})
                 for(int divisor:{4,6,8})
                     ok &= probe(rate,block,ShifterProfile::Experimental18ms,true,divisor,instances);
+    // Compare 18 ms unsplit under simultaneous inserts before recommending
+    // the experimental lower-PDC build for real Android recording.
+    for(int rate:{44100,48000})
+        for(int block:{32,64,96,128})
+            for(int instances:{1,4,8})
+                ok &= probe(rate,block,ShifterProfile::Experimental18ms,false,4,instances);
     return ok?0:1;
 }
