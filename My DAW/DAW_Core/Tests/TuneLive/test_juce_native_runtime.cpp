@@ -115,6 +115,30 @@ int main() {
                 return fail("obsolete anti-click research switch visible on mobile");
         }
         if(rotary!=3 || !vocalRangeFound)return fail("mobile controls or familiar vocal range labels missing");
+        juce::TextButton* advanced=nullptr;
+        juce::Slider* detune=nullptr;
+        for(auto* component:simple->getChildren()) {
+            if(auto* button=dynamic_cast<juce::TextButton*>(component);
+                button && button->getButtonText()=="ADVANCED")advanced=button;
+            if(auto* slider=dynamic_cast<juce::Slider*>(component);
+                slider && slider->getSliderStyle()==juce::Slider::LinearHorizontal)detune=slider;
+        }
+        if(!advanced || !detune || detune->isVisible() ||
+            std::abs(detune->getValue()-0.5)>0.0001)
+            return fail("advanced Detune default 440 Hz or visibility");
+        advanced->onClick();
+        if(!detune->isVisible() || advanced->getButtonText()!="DONE")
+            return fail("advanced Detune cannot be opened");
+        for(auto* component:simple->getChildren())
+            if(component->isVisible() && !simple->getLocalBounds().contains(component->getBounds()))
+                return fail("advanced editor clips a visible control");
+        detune->setValue(0.1,juce::sendNotificationSync);
+        if(std::abs(mobileTracking.getParameters()[Tune::kA4Reference]->getValue()-0.1f)>0.0001f)
+            return fail("Detune did not drive the existing concert pitch parameter");
+        detune->setValue(0.5,juce::sendNotificationSync);
+        advanced->onClick();
+        if(detune->isVisible() || advanced->getButtonText()!="ADVANCED")
+            return fail("advanced Detune cannot be closed");
     }
     mobileTracking.getParameters()[Tune::kBypass]->setValueNotifyingHost(1.0f);
     {

@@ -120,6 +120,28 @@ public:
         // Keep legacy concert-pitch automation/state intact; the standard
         // editor needs no A4 slider (factory default 440 Hz).
         reference_.setVisible(!processor_.usesSpectralTracking());
+        reference_.setDoubleClickReturnValue(true,0.5);
+        reference_.setTooltip("Detune: concert pitch A4. Keep 440 Hz unless the instrumental uses another tuning. Double-click to reset.");
+        if(processor_.usesSpectralTracking()) {
+            advanced_.setButtonText("ADVANCED");
+            advanced_.setTooltip("Show concert-pitch calibration");
+            advanced_.setColour(juce::TextButton::buttonColourId,Visual::surface());
+            advanced_.setColour(juce::TextButton::textColourOffId,Visual::ivory());
+            advanced_.onClick=[this](){
+                advancedOpen_=!advancedOpen_;
+                advanced_.setButtonText(advancedOpen_?"DONE":"ADVANCED");
+                reference_.setVisible(advancedOpen_);
+                if(advancedOpen_) {
+                    heightBeforeAdvanced_=getHeight();
+                    if(getHeight()<420)setSize(getWidth(),420);
+                } else if(heightBeforeAdvanced_<420 && getHeight()==420) {
+                    setSize(getWidth(),heightBeforeAdvanced_);
+                }
+                resized();
+                repaint();
+            };
+            addAndMakeVisible(advanced_);
+        }
         keys_.onChange=[this](){
             const int option=keys_.getSelectedId()-1;
             if(option>=0 && option<static_cast<int>(keyOptions_.size()))
@@ -221,15 +243,17 @@ public:
             const auto w=getWidth();
             g.setColour(Visual::ivory());
             g.setFont(juce::Font(juce::FontOptions(18.0f).withStyle("Bold")));
-            g.drawText("APEX TUNE LIVE",12,7,w-24,27,juce::Justification::centredLeft);
+            g.drawText("APEX TUNE LIVE",12,7,w-116,27,juce::Justification::centredLeft);
             const auto h=getHeight();
             const int half=w/2;
-            const int top=std::max(74,h*20/100);
+            const int top=std::max(74,std::min(100,h*20/100));
             g.setColour(Visual::muted());
             g.setFont(juce::Font(juce::FontOptions(11.0f).withStyle("Bold")));
             g.drawText("KEY",12,top,half-20,16,juce::Justification::centredLeft);
             g.drawText("SCALE",half+5,top,half-16,16,juce::Justification::centredLeft);
             g.drawText("VOCAL RANGE",12,top+58,w-24,16,juce::Justification::centredLeft);
+            if(advancedOpen_)
+                g.drawText("DETUNE (A4 REFERENCE)",12,top+116,w-24,16,juce::Justification::centredLeft);
             return;
         }
 #if JUCE_ANDROID
@@ -456,15 +480,19 @@ public:
     void resized() override {
         if (processor_.usesSpectralTracking()) {
             const int w=getWidth(),h=getHeight(),half=w/2;
-            const int top=std::max(74,h*20/100);
+            const int top=std::max(74,std::min(100,h*20/100));
+            advanced_.setBounds(w-100,7,88,27);
             pitchLabel_.setBounds(12,34,half-18,std::max(36,top-38));
             pitchCaption_.setBounds(half,34,half-12,std::max(36,top-38));
             keys_.setBounds(12,top+17,half-18,37);
             scales_.setBounds(half+5,top+17,half-17,37);
             ranges_.setBounds(12,top+75,w-24,37);
             constexpr int indices[]{1,2,4};
-            const int cw=(w-24)/3, y=top+119;
-            const int kh=std::max(60,h-y-68);
+            if(advancedOpen_)reference_.setBounds(12,top+133,w-24,32);
+            const int cw=(w-24)/3, y=top+119+(advancedOpen_?52:0);
+            // Even if a host forces 360px while advanced is open,
+            // keep every control within the editor, without overlap.
+            const int kh=std::max(40,h-y-68);
             for(int j=0;j<3;++j) {
                 const int i=indices[j],x=12+j*cw;
                 knobLabels_[i].setBounds(x,y,cw,20);
@@ -681,6 +709,9 @@ private:
     std::array<juce::TextButton,3> styles_;
     juce::ComboBox keys_,scales_,ranges_;
     juce::Slider reference_;
+    juce::TextButton advanced_;
+    bool advancedOpen_=false;
+    int heightBeforeAdvanced_=390;
     juce::ToggleButton formants_,bypass_,experimentalDeclick_;
     juce::Label pitchLabel_,pitchCaption_,latencyLabel_;
 };
