@@ -77,6 +77,7 @@ public:
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
         engine_(engine),
         spectralTracking_(engine == Engine::Tracking && useSpectralTracking),
+        spectralPhaseSlot_(spectralTracking_ ? nextSpectralSlot_.fetch_add(1,std::memory_order_relaxed)%8u : 0u),
         tracking_(engine == Engine::Tracking && !spectralTracking_
                       ? std::make_unique<RealtimeCore>() : nullptr) {
         add(kAmount, "tunelive.amount", "Correction Amount", spectralTracking_?1.0f:0.85f);
@@ -144,7 +145,10 @@ public:
                                   : ShifterProfile::HighQuality40ms,
                 spectralTracking_ ? StudioControlClock::ResearchFixed1ms
                                   : StudioControlClock::ApprovedHostChunks,
-                false);
+                false,0.0,4,
+                spectralTracking_ ? static_cast<int>(spectralPhaseSlot_*
+                    static_cast<unsigned>(std::max(64,int(std::lround(rate*.018/4))))/8u) : 0,
+                spectralTracking_);
             latency = dsp_.latencySamples();
         }
         latencyForDisplay_.store(latency, std::memory_order_relaxed);
@@ -255,6 +259,9 @@ private:
     DspCore dsp_;
     const Engine engine_;
     const bool spectralTracking_;
+    // Prepare-time phase assignment; no shared counter or locks on audio thread.
+    inline static std::atomic<unsigned> nextSpectralSlot_{0};
+    const unsigned spectralPhaseSlot_;
     const std::unique_ptr<RealtimeCore> tracking_;
     std::atomic<float> lastHz_{0.0f}, lastShift_{0.0f};
     std::atomic<int> latencyForDisplay_{0};

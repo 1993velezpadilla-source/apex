@@ -6,6 +6,29 @@
 #include <cmath>
 #include <array>
 #include <numeric>
+#include <atomic>
+#include <cstdlib>
+#include <new>
+namespace {
+std::atomic<bool> watch{false};
+std::atomic<unsigned> allocationCount{0};
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+void releaseMemory(void* p) noexcept { std::free(p); }
+}
+void* operator new(std::size_t size) {
+    if(watch.load(std::memory_order_relaxed))
+        allocationCount.fetch_add(1,std::memory_order_relaxed);
+    if(auto* p=std::malloc(size?size:1)) return p;
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size){return ::operator new(size);}
+void operator delete(void* p) noexcept {releaseMemory(p);}
+void operator delete[](void* p) noexcept {releaseMemory(p);}
+void operator delete(void* p,std::size_t) noexcept {releaseMemory(p);}
+void operator delete[](void* p,std::size_t) noexcept {releaseMemory(p);}
+
 using namespace APEX::TuneLive;
 using Clock=std::chrono::steady_clock;
 static bool probe(int rate,int block,ShifterProfile profile,bool split,int divisor=4,int instances=1,bool stagger=false,bool resumeStagger=false)
@@ -35,6 +58,7 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
     times.reserve(source.size()/block);
     const double deadline=1000.0*block/rate;
     int misses=0,missesAfterSilence=0;
+    allocationCount.store(0,std::memory_order_relaxed);
     double peak=0,step=0,previous=0,energy=0;
     bool finite=true;
     for(int pos=0;pos+block<=int(source.size());pos+=block) {
@@ -45,6 +69,7 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
             std::copy_n(source.data()+pos,block,extraL[j].data());
             std::copy_n(source.data()+pos,block,extraR[j].data());
         }
+        watch.store(true,std::memory_order_relaxed);
         const auto begin=Clock::now();
         core.process(ch,2,block,cfg);
         for(int j=1;j<instances;++j) {
@@ -52,6 +77,7 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
             cores[j].process(extra,2,block,cfg);
         }
         const double ms=std::chrono::duration<double,std::milli>(Clock::now()-begin).count();
+        watch.store(false,std::memory_order_relaxed);
         if(pos>=rate/4){times.push_back(ms);misses+=ms>deadline;
             if(pos>=rate*1.5)missesAfterSilence+=ms>deadline;}
         for(int i=0;i<block;++i){
@@ -63,6 +89,7 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
             energy+=double(l[i])*l[i];previous=l[i];
         }
     }
+    const auto allocations=allocationCount.load(std::memory_order_relaxed);
     std::sort(times.begin(),times.end());
     const auto p=[&](double q){return times[static_cast<std::size_t>(q*(times.size()-1))];};
     const int latency=core.latencySamples();
@@ -93,9 +120,9 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
         <<" p50_ms="<<p(.5)<<" p95_ms="<<p(.95)<<" p99_ms="<<p(.99)
         <<" max_ms="<<times.back()<<" deadline_misses="<<misses<<" misses_after_silence="<<missesAfterSilence<<" count="<<times.size()
         <<" peak="<<peak<<" max_step="<<step<<" rms="<<std::sqrt(energy/source.size())
-        <<" exact_bypass="<<aligned<<"\n";
+        <<" callback_cpp_allocations="<<allocations<<" exact_bypass="<<aligned<<"\n";
     // Host timing is comparative telemetry, not an Android release gate.
-    return finite && aligned && peak<2.0 && energy>0;
+    return finite && aligned && peak<2.0 && energy>0 && allocations==0;
 }
 int main(){
     bool ok=true;
