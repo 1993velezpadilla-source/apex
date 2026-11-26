@@ -19,7 +19,7 @@ public:
         setResizable(true, true);
 #if JUCE_ANDROID
         setResizeLimits(280, 360, 1600, 1600);
-        setSize(360, processor_.usesSpectralTracking() ? 460 : 610);
+        setSize(360, processor_.usesSpectralTracking() ? 390 : 610);
 #else
         // Controls/latency readout occupy rows through y=516; a 480px
         // editor cut off the last row. Enforce a true touch-safe minimum.
@@ -117,6 +117,9 @@ public:
         };
         reference_.onDragEnd=[this](){parameter(Processor::kA4Reference).endChangeGesture();};
         addAndMakeVisible(reference_);
+        // Keep legacy concert-pitch automation/state intact; the standard
+        // editor needs no A4 slider (factory default 440 Hz).
+        reference_.setVisible(!processor_.usesSpectralTracking());
         keys_.onChange=[this](){
             const int option=keys_.getSelectedId()-1;
             if(option>=0 && option<static_cast<int>(keyOptions_.size()))
@@ -130,9 +133,13 @@ public:
         scales_.onChange=[this](){setDiscrete(Processor::kScale,scales_.getSelectedId()-1,2);};
         addAndMakeVisible(scales_);
 
+        constexpr std::array<const char*,4> singerLabels{{
+            "Automatic", "Baritone / Bass", "Alto / Tenor", "Soprano"
+        }};
         for (std::size_t i=0; i<kVocalRanges.size(); ++i)
-            ranges_.addItem(kVocalRanges[i].label, static_cast<int>(i)+1);
-        ranges_.setTooltip("Limit pitch detection to your vocal register.");
+            ranges_.addItem(processor_.usesSpectralTracking()?singerLabels[i]:kVocalRanges[i].label,
+                            static_cast<int>(i)+1);
+        ranges_.setTooltip("Automatic covers all vocal registers. Choose Baritone / Bass for low notes, Alto / Tenor for mid-range, or Soprano for high notes. This does not transpose your voice.");
         ranges_.setSelectedId(1,juce::dontSendNotification);
         ranges_.onChange=[this](){
             setDiscrete(Processor::kVocalRange,ranges_.getSelectedId()-1,static_cast<int>(kVocalRanges.size())-1);
@@ -166,7 +173,7 @@ public:
             addAndMakeVisible(experimentalDeclick_);
         }
 
-        for(int i=0;i<3;++i) {
+        if (!processor_.usesSpectralTracking()) for(int i=0;i<3;++i) {
             auto& button=styles_[static_cast<std::size_t>(i)];
             button.setButtonText(kVocalStyles[static_cast<std::size_t>(i)].name);
             button.setColour(juce::TextButton::buttonColourId,
@@ -222,8 +229,7 @@ public:
             g.setFont(juce::Font(juce::FontOptions(11.0f).withStyle("Bold")));
             g.drawText("KEY",12,top,half-20,16,juce::Justification::centredLeft);
             g.drawText("SCALE",half+5,top,half-16,16,juce::Justification::centredLeft);
-            g.drawText("VOCAL RANGE",12,top+58,half-20,16,juce::Justification::centredLeft);
-            g.drawText("REFERENCE A4",half+5,top+58,half-16,16,juce::Justification::centredLeft);
+            g.drawText("VOCAL RANGE",12,top+58,w-24,16,juce::Justification::centredLeft);
             return;
         }
 #if JUCE_ANDROID
@@ -455,22 +461,19 @@ public:
             pitchCaption_.setBounds(half,34,half-12,std::max(36,top-38));
             keys_.setBounds(12,top+17,half-18,37);
             scales_.setBounds(half+5,top+17,half-17,37);
-            ranges_.setBounds(12,top+75,half-18,37);
-            reference_.setBounds(half+5,top+75,half-17,37);
+            ranges_.setBounds(12,top+75,w-24,37);
             constexpr int indices[]{1,2,4};
             const int cw=(w-24)/3, y=top+119;
-            const int kh=std::max(60,h-y-115);
+            const int kh=std::max(60,h-y-68);
             for(int j=0;j<3;++j) {
                 const int i=indices[j],x=12+j*cw;
                 knobLabels_[i].setBounds(x,y,cw,20);
                 knobs_[i].setBounds(x,y+20,cw,kh-20);
             }
             const int footer=y+kh;
-            for(int i=0;i<3;++i)
-                styles_[i].setBounds(12+i*cw,footer+3,cw-4,32);
-            formants_.setBounds(12,footer+39,half+24,32);
-            bypass_.setBounds(half+36,footer+39,half-48,32);
-            latencyLabel_.setBounds(12,footer+75,w-24,25);
+            formants_.setBounds(12,footer+3,half+24,32);
+            bypass_.setBounds(half+36,footer+3,half-48,32);
+            latencyLabel_.setBounds(12,footer+36,w-24,25);
             return;
         }
 #if JUCE_ANDROID
@@ -567,7 +570,7 @@ private:
             return std::abs(parameter(id).getValue()-expected)<0.0015f;
         };
         int matchingStyle=-1;
-        for(int i=0;i<3;++i) {
+        if (!processor_.usesSpectralTracking()) for(int i=0;i<3;++i) {
             const auto& p=kVocalStyles[static_cast<std::size_t>(i)];
             if((processor_.usesSpectralTracking() || close(Processor::kAmount,p.amount))
                 && close(Processor::kSpeed,p.retune)

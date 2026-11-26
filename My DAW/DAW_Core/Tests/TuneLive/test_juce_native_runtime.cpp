@@ -89,7 +89,24 @@ int main() {
     {
         std::unique_ptr<juce::AudioProcessorEditor> simple(mobileTracking.createEditor());
         int rotary=0;
+        bool vocalRangeFound=false;
+        simple->setSize(320,360);
         for(auto* component:simple->getChildren()) {
+            if(component->isVisible() && !simple->getLocalBounds().contains(component->getBounds()))
+                return fail("compact mobile editor clips a visible control");
+            if(auto* range=dynamic_cast<juce::ComboBox*>(component);
+                range && range->isVisible() && range->getNumItems()==4 &&
+                range->getItemText(1)=="Baritone / Bass" &&
+                range->getItemText(2)=="Alto / Tenor" &&
+                range->getItemText(3)=="Soprano") vocalRangeFound=true;
+            if(auto* button=dynamic_cast<juce::TextButton*>(component);
+                button && button->isVisible() &&
+                (button->getButtonText()=="NATURAL" || button->getButtonText()=="MODERN" ||
+                 button->getButtonText()=="HARD TUNE"))
+                return fail("obsolete style presets visible in mobile editor");
+            if(auto* slider=dynamic_cast<juce::Slider*>(component);
+                slider && slider->isVisible() && slider->getSliderStyle()==juce::Slider::LinearHorizontal)
+                return fail("unnecessary A4 reference slider visible in mobile editor");
             if(auto* slider=dynamic_cast<juce::Slider*>(component);
                 slider && slider->isVisible() &&
                 slider->getSliderStyle()==juce::Slider::RotaryHorizontalVerticalDrag) ++rotary;
@@ -97,7 +114,7 @@ int main() {
                 toggle && toggle->isVisible() && toggle->getButtonText().contains("ANTI-CLICK"))
                 return fail("obsolete anti-click research switch visible on mobile");
         }
-        if(rotary!=3)return fail("mobile must expose exactly three main tuning knobs");
+        if(rotary!=3 || !vocalRangeFound)return fail("mobile controls or familiar vocal range labels missing");
     }
     mobileTracking.getParameters()[Tune::kBypass]->setValueNotifyingHost(1.0f);
     {
