@@ -25,7 +25,8 @@ static bool testMobileSpectral()
     bool allShipping=true;
     for(int rate : {44100,48000,96000}) {
         for(auto profile : {ShifterProfile::HighQuality40ms, ShifterProfile::Experimental18ms, ShifterProfile::Experimental12ms}) {
-            for(auto clock : {StudioControlClock::ApprovedHostChunks,StudioControlClock::ResearchFixed1ms}) {
+            for(auto clock : {StudioControlClock::ApprovedHostChunks,StudioControlClock::ResearchFixed1ms})
+            for(bool split : {false,true}) {
                 constexpr double source=252.0,target=261.6255653;
                 std::vector<float> dry(rate*3);
                 for(int i=0;i<rate*3;++i) {
@@ -34,7 +35,7 @@ static bool testMobileSpectral()
                 }
                 auto audio=dry;
                 DspCore core;
-                core.prepare(rate,512,1,profile,clock);
+                core.prepare(rate,512,1,profile,clock,split);
                 DspSettings s;
                 s.key=1;s.scale=1;s.correction=s.wet=1.0f;
                 s.retune=s.humanize=s.flexTune=s.vibratoPreserve=0.0f;
@@ -71,7 +72,8 @@ static bool testMobileSpectral()
                 }
                 const double expectedMs=profile==ShifterProfile::HighQuality40ms?40:
                     (profile==ShifterProfile::Experimental18ms?18:12);
-                const int expected=static_cast<int>(std::lround(rate*expectedMs/1000));
+                const int window=static_cast<int>(std::lround(rate*expectedMs/1000));
+                const int expected=window+(split?std::max(64,static_cast<int>(std::lround(window*0.25))):0);
                 const int latency=core.latencySamples();
                 const double tracked=core.frequencyHz(),requested=core.debugTargetShiftSemitones(),
                     applied=core.debugAppliedShiftSemitones(),wet=core.debugWetAmount();
@@ -83,13 +85,13 @@ static bool testMobileSpectral()
                     && original<0.10*corrected && peak<1.0 && maxStep<0.12
                     && std::abs(latency-expected)<=4 && bypass;
                 std::cout<<"MOBILE_SPECTRAL_PROFILE rate="<<rate<<" window_ms="<<expectedMs
-                    <<" clock="<<static_cast<int>(clock)<<" tracked="<<tracked
+                    <<" clock="<<static_cast<int>(clock)<<" split="<<split<<" tracked="<<tracked
                     <<" requested_st="<<requested<<" applied_st="<<applied<<" wet="<<wet
                     <<" measured_hz="<<measured.hz<<" cents="<<cents<<" source_f0="<<original
                     <<" corrected_peak="<<corrected<<" corrected_peak_hz="<<peakHz
                     <<" rms="<<std::sqrt(energy/(2*rate))<<" peak="<<peak<<" max_step="<<maxStep
                     <<" PDC="<<latency<<" bypass="<<bypass<<" pass="<<pass<<"\n";
-                if(profile==ShifterProfile::HighQuality40ms &&
+                if(profile==ShifterProfile::Experimental18ms && split &&
                    clock==StudioControlClock::ResearchFixed1ms) allShipping &= pass;
             }
         }

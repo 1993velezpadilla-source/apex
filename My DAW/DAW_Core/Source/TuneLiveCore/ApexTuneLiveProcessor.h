@@ -135,9 +135,16 @@ public:
             tracking_->setResearchPhaseSlew(param(kExperimentalDeclick) >= 0.5f);
             latency = tracking_->latencySamples();
         } else {
-            dsp_.prepare(rate, block, channels, ShifterProfile::HighQuality40ms,
+            // Android candidate: the measured 18-ms profile had better
+            // sustained-note accuracy than 40/12 ms. Spread spectral
+            // computation across its hop; disclose actual 22.5-ms PDC.
+            // Legacy Studio and desktop Tracking retain their engines.
+            dsp_.prepare(rate, block, channels,
+                spectralTracking_ ? ShifterProfile::Experimental18ms
+                                  : ShifterProfile::HighQuality40ms,
                 spectralTracking_ ? StudioControlClock::ResearchFixed1ms
-                                  : StudioControlClock::ApprovedHostChunks);
+                                  : StudioControlClock::ApprovedHostChunks,
+                spectralTracking_);
             latency = dsp_.latencySamples();
         }
         latencyForDisplay_.store(latency, std::memory_order_relaxed);
