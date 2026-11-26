@@ -170,7 +170,7 @@ static bool rawTransfer(Candidate c,int rate,double target,double detune,
     return finite && peak>.01 && peak<1;
 }
 int main(){
-    const Candidate candidates[]={{18,4,true},{18,4,false},{16,8,true},{14,8,true},{12,8,true},{12,4,true},{10,8,true},{8,8,true},{6,8,true}};
+    const Candidate candidates[]={{18,4,true},{18,4,false},{18,5,true},{18,6,true},{18,8,true},{17,6,true},{17,8,true},{16,6,true},{16,8,true},{14,8,true},{12,8,true},{12,4,true},{10,8,true},{8,8,true},{6,8,true}};
     bool safe=true;
     for(auto c:candidates)
         for(int rate:{44100,48000})
