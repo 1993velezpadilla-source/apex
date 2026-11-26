@@ -16,12 +16,12 @@
 #include <vector>
 
 namespace {
-constexpr int rate=48000,nframes=rate*3,block=128,latency=1920;
+constexpr int rate=48000,nframes=rate*3,block=128;
 constexpr double pi=3.1415926535897932384626433832795;
 constexpr int pitchedEnd=rate*115/100;
 constexpr int hissEnd=rate*225/100;
 
-bool run(int channels) {
+bool run(int channels,bool mobile=false,bool split=false) {
     using namespace APEX::TuneLive;
     std::vector<float> originalL(nframes),originalR(nframes),left,right;
     std::uint32_t seed=0x41504558u;
@@ -45,7 +45,10 @@ bool run(int channels) {
     }
     left=originalL;right=originalR;
     DspCore core;
-    core.prepare(rate,block,channels);
+    core.prepare(rate,block,channels,
+        mobile?ShifterProfile::Experimental18ms:ShifterProfile::HighQuality40ms,
+        mobile?StudioControlClock::ResearchFixed1ms:StudioControlClock::ApprovedHostChunks,split);
+    const int latency=core.latencySamples();
     DspSettings user;
     user.correction=1.0f;user.retune=0.0f;
     user.humanize=0.0f;user.flexTune=0.0f;
@@ -86,7 +89,7 @@ bool run(int channels) {
             maxSilence=std::max({maxSilence,std::abs(sample),std::abs(other)});
     }
     std::cout<<"TUNE_LIVE_REAL_VOWEL_HISS_RETURN"
-             <<" channels="<<channels
+             <<" channels="<<channels<<" mobile="<<mobile<<" split="<<split
              <<" variable_callbacks="<<callback
              <<" vowel_effective_wet="<<vowelWet
              <<" late_hiss_effective_wet="<<lateHissWet
@@ -94,13 +97,17 @@ bool run(int channels) {
              <<" max_after_silence="<<maxSilence
              <<" peak="<<peak
              <<" PDC="<<core.latencySamples()<<"\\n";
-    return core.latencySamples()==latency && peak>0.02 && peak<2.0
+    return latency==(mobile?(split?1080:864):1920) && peak>0.02 && peak<2.0
         && vowelWet>0.50f && lateHissWet<0.005f
         && maxHissError<0.0002 && maxSilence<0.0002;
 }
 }
 int main() {
-    if(!run(1)||!run(2)) {
+    bool ok=run(1)&&run(2);
+    for(int channels:{1,2})
+        for(bool split:{false,true})
+            ok &= run(channels,true,split);
+    if(!ok) {
         std::cerr<<"FAIL: production HQ40 does not return to dry after "
                     "unvoiced fricative/hiss or silence\\n";
         return 1;

@@ -4,6 +4,7 @@ on:
     branches: [feature/mobile-oboe-audio-options-20261125]
     paths:
       - 'My DAW/DAW_Core/Tests/TuneLive/test_live_control_switch.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_unvoiced_articulation_return.cpp'
       - '.github/workflows/apex-tune-live-spectral-switch.yml'
   workflow_dispatch:
 permissions:
@@ -21,6 +22,8 @@ jobs:
           set -euo pipefail
           g++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -Werror -isystem "My DAW/DAW_Core/Source/ThirdParty" -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" "My DAW/DAW_Core/Tests/TuneLive/test_live_control_switch.cpp" -o spectral_switch
           ./spectral_switch | tee spectral-switch.txt
+          g++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -Werror -isystem "My DAW/DAW_Core/Source/ThirdParty" -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" "My DAW/DAW_Core/Tests/TuneLive/test_unvoiced_articulation_return.cpp" -o spectral_articulation
+          ./spectral_articulation | tee -a spectral-switch.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
