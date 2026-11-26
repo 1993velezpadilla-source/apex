@@ -28,7 +28,8 @@ class DspCore final {
 public:
     void prepare(double sampleRate,int maxBlockSize,int numChannels,
                  ShifterProfile profile=ShifterProfile::HighQuality40ms,
-                 StudioControlClock clock=StudioControlClock::ApprovedHostChunks) {
+                 StudioControlClock clock=StudioControlClock::ApprovedHostChunks,
+                 bool splitComputation=false) {
         profile_=profile;
         fixedClock_=clock==StudioControlClock::ResearchFixed1ms;
         rate_=std::isfinite(sampleRate) && sampleRate>8000.0 ? sampleRate : 48000.0;
@@ -46,7 +47,9 @@ public:
                                       ?0.018 : 0.040;
         const int window=std::max(256,static_cast<int>(std::lround(rate_*windowSeconds)));
         const int interval=std::max(64,static_cast<int>(std::lround(window*0.25)));
-        stretch_.configure(channels_,window,interval,false);
+        // Research opt-in only: distribute spectral work across the hop.
+        // The library reports the added interval in outputLatency().
+        stretch_.configure(channels_,window,interval,splitComputation);
         stretch_.reset();
         stretch_.setTransposeFactor(1.0f);
         stretch_.setFormantFactor(1.0f,true);

@@ -1,0 +1,30 @@
+name: Tune Live spectral callback budget
+on:
+  push:
+    branches: [feature/mobile-portrait-oboe-audio-options-20261125]
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_spectral_callback_budget.cpp'
+      - '.github/workflows/apex-tune-live-spectral-budget.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  budget:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Optimized spectral callback benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" rev-parse HEAD)" = "57b93f4e9206a089a45387eaa39bdc9f310d3308"
+          g++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -Werror -isystem "My DAW/DAW_Core/Source/ThirdParty" -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" "My DAW/DAW_Core/Tests/TuneLive/test_spectral_callback_budget.cpp" -o spectral_budget
+          ./spectral_budget | tee spectral-budget.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spectral-callback-budget
+          path: spectral-budget.txt
