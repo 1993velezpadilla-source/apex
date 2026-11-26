@@ -29,15 +29,19 @@ public:
         DAW::ApexNativePluginFormat native;
         juce::OwnedArray<juce::PluginDescription> results;
         native.findAllTypesForFile(results,{});
-        expectEquals(results.size(),9,"nine visible APEX Native processors");
+        expectEquals(results.size(),8,"eight visible APEX Native processors");
+        int trackingMatches=0;
         int limiterMatches=0;
         int precisionMatches=0;
         for(const auto* item:results)
         {
             expect(item->fileOrIdentifier!="APEX::C4","unfinished C4 is not advertised");
+            expect(item->fileOrIdentifier!="APEX::TuneLive","legacy Studio Tune Live is not advertised");
+            if(item->fileOrIdentifier==APEX::TuneLive::Processor::kTrackingIdentifier) ++trackingMatches;
             if (item->fileOrIdentifier=="APEX::BubblegumLimiter") ++limiterMatches;
             if (item->fileOrIdentifier=="APEX::PrecisionC3") ++precisionMatches;
         }
+        expectEquals(trackingMatches,1,"one visible Tune Live identity");
         expectEquals(limiterMatches,1,"new limiter is advertised exactly once");
         expectEquals(precisionMatches,1,"second compressor is advertised exactly once");
         juce::PluginDescription description;

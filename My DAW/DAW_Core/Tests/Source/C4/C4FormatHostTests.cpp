@@ -202,9 +202,9 @@ private:
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
-            expectEquals (found.size(), 9,
-                          "discover G10, EQ, Opto 2A, Precision C, Limiter, Delay, Reverie and both Tune Live inserts");
-            if (found.size() == 9)
+            expectEquals (found.size(), 8,
+                          "discover G10, EQ, Opto 2A, Precision C, Limiter, Delay, Reverie and one Tune Live insert");
+            if (found.size() == 8)
             {
                 expectEquals (found[0]->fileOrIdentifier, juce::String ("APEX::G10"));
                 expectEquals (found[1]->fileOrIdentifier, juce::String (
@@ -214,11 +214,10 @@ private:
                 expectEquals (found[4]->fileOrIdentifier, juce::String ("APEX::BubblegumLimiter"));
                 expectEquals (found[5]->fileOrIdentifier, juce::String ("APEX::BubblegumDelay"));
                 expectEquals (found[6]->fileOrIdentifier, juce::String ("APEX::ReverieReverb"));
-                expectEquals (found[7]->fileOrIdentifier, juce::String ("APEX::TuneLive"));
-                expectEquals (found[8]->fileOrIdentifier, juce::String (APEX::TuneLive::Processor::kTrackingIdentifier));
+                expectEquals (found[7]->fileOrIdentifier, juce::String (APEX::TuneLive::Processor::kTrackingIdentifier));
             }
             for (const auto* item : found)
-                expect (item->fileOrIdentifier != "APEX::C4", "unfinished C4 remains hidden");
+                expect (item->fileOrIdentifier != "APEX::C4" && item->fileOrIdentifier != "APEX::TuneLive", "unfinished C4 and legacy Tune Live remain hidden");
         }
 
         // The new native vocal insert must be constructible by the SAME

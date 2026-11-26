@@ -236,17 +236,17 @@ public:
                     "scanner seeded Bubblegum Delay into cache/browser");
             expect (scanner.getCache().hasCachedEntry ("APEX::ReverieReverb"),
                     "scanner seeded Reverie into cache/browser");
-            expect (scanner.getCache().hasCachedEntry ("APEX::TuneLive"),
-                    "scanner seeded Tune Live for immediate browser discovery");
+            expect (!scanner.getCache().hasCachedEntry ("APEX::TuneLive"),
+                    "legacy Studio Tune Live remains hidden from browser discovery");
             expect (scanner.getCache().hasCachedEntry (APEX::TuneLive::Processor::kTrackingIdentifier),
                     "scanner seeded the Tracking insert for immediate browser discovery");
             int apexNativeCount = 0;
             for (const auto& c : scanner.getCache().getAll())
                 if (c.format.equalsIgnoreCase ("APEX Native"))
                     ++apexNativeCount;
-            expectEquals (apexNativeCount, 9,
-                          "nine visible native effects");
-            expect (scanner.getCache().getCount() >= 9, "other cached entries preserved");
+            expectEquals (apexNativeCount, 8,
+                          "eight visible native effects");
+            expect (scanner.getCache().getCount() >= 8, "other cached entries preserved");
         }
     }
 
