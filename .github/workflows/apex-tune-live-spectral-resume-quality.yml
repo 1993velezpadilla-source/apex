@@ -1,0 +1,29 @@
+name: Tune Live spectral resume quality
+on:
+  push:
+    branches: [feature/mobile-portrait-oboe-latency18-20261126]
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_spectral_resume_quality.cpp'
+      - '.github/workflows/apex-tune-live-spectral-resume-quality.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  resume:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Test all eight phase slots in mono and stereo
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -Werror -isystem "My DAW/DAW_Core/Source/ThirdParty" -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" "My DAW/DAW_Core/Tests/TuneLive/test_spectral_resume_quality.cpp" -o spectral_resume
+          ./spectral_resume | tee spectral-resume.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spectral-resume-quality
+          path: spectral-resume.txt
