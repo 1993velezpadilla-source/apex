@@ -1,9 +1,42 @@
 // Independent spectral frontier. No automatic promotion of a candidate.
-#define main prior_feasibility_main
-#include "test_12ms_feasibility.cpp"
-#undef main
+#include "../../Source/TuneLiveCore/ApexTuneLiveDspCore.h"
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <vector>
 #include <chrono>
-#include <iomanip>
+constexpr double pi=3.14159265358979323846;
+double correlationHz(const std::vector<float>& wave,double sr,double expectedHz) {
+    const int minLag=std::max(2,static_cast<int>(std::floor(sr/(expectedHz*1.06))));
+    const int maxLag=static_cast<int>(std::ceil(sr/(expectedHz*0.94)));
+    const int begin=static_cast<int>(wave.size())-8192-maxLag;
+    if(begin<0)return 0.0;
+    const int count=8192;
+    auto score=[&](int lag) {
+        double ab=0.0,aa=0.0,bb=0.0;
+        for(int i=0;i<count;++i) {
+            const double a=wave[static_cast<std::size_t>(begin+i)];
+            const double b=wave[static_cast<std::size_t>(begin+i+lag)];
+            ab+=a*b;aa+=a*a;bb+=b*b;
+        }
+        return ab/std::sqrt(std::max(1.0e-24,aa*bb));
+    };
+    int best=minLag;
+    double peak=-2.0;
+    for(int lag=minLag;lag<=maxLag;++lag) {
+        const double value=score(lag);
+        if(value>peak){peak=value;best=lag;}
+    }
+    double lag=best;
+    if(best>minLag && best<maxLag) {
+        const double left=score(best-1),mid=score(best),right=score(best+1);
+        const double denom=left-2.0*mid+right;
+        if(std::abs(denom)>1.0e-12)
+            lag+=std::clamp(0.5*(left-right)/denom,-0.5,0.5);
+    }
+    return (peak>0.5 && lag>0.0)?sr/lag:0.0;
+}
+
 struct Candidate { double ms; int divisor; bool split; };
 static double projection(const std::vector<float>& a,int rate,double hz) {
     const int n=rate, start=int(a.size())-n;
