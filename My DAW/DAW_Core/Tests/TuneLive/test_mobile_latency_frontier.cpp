@@ -90,6 +90,10 @@ static bool probeMobile(Candidate c,int rate,double target,double detune) {
         }
     };
     run(a,true);
+    const double tracked=dsp.frequencyHz();
+    const double requested=dsp.debugTargetShiftSemitones();
+    const double applied=dsp.debugAppliedShiftSemitones();
+    const double wet=dsp.debugWetAmount();
     std::sort(times.begin(),times.end());
     const double hz=correlationHz(a,rate,target);
     const double cents=hz>0?1200*std::log2(hz/target):9999;
@@ -113,10 +117,57 @@ static bool probeMobile(Candidate c,int rate,double target,double detune) {
     const bool tonal=std::abs(cents)<=18 && targetPeak>.08 && original<targetPeak*.15;
     std::cout<<"LATENCY_FRONTIER window="<<c.ms<<" divisor="<<c.divisor<<" split="<<c.split
         <<" rate="<<rate<<" target="<<target<<" detune="<<detune<<" pdc_ms="<<1000.0*pdc/rate
-        <<" cents="<<cents<<" source_leak="<<original/std::max(targetPeak,1e-12)
+        <<" tracked="<<tracked<<" requested="<<requested<<" applied="<<applied
+        <<" wet="<<wet<<" cents="<<cents<<" source_leak="<<original/std::max(targetPeak,1e-12)
         <<" peak="<<peak<<" max_step="<<step<<" p99_ms="<<times[size_t(.99*(times.size()-1))]
         <<" max_ms="<<times.back()<<" misses="<<missed<<" safe="<<safe<<" tonal="<<tonal<<"\n";
     return safe;
+}
+// Direct shifter transfer: bypass all APEX note selection, detector,
+// and wet gates. An imperfect result here cannot be solved by a faster
+// retune knob. These gains are probes, NOT production compensation.
+static bool rawTransfer(Candidate c,int rate,double target,double detune,
+                        bool formants,double gain) {
+    const int frames=rate*2;
+    const double source=target*std::exp2(detune/1200);
+    std::vector<float> input(frames),out(frames);
+    for(int i=0;i<frames;++i) {
+        const double p=2*pi*source*i/rate;
+        double v=.26*std::sin(p);
+        for(int h=2;h<=10;++h) {
+            const double f=source*h;
+            v+=(.035+.18*std::exp(-.5*std::pow((f-850)/230,2)))/h*std::sin(h*p+.13*h);
+        }
+        input[i]=float(v);
+    }
+    const int window=std::max(256,int(std::lround(rate*c.ms*.001)));
+    const int hop=std::max(64,int(std::lround(double(window)/c.divisor)));
+    signalsmith::stretch::SignalsmithStretch<float> shifter{0x41504558L};
+    shifter.configure(1,window,hop,c.split);
+    shifter.reset();
+    shifter.setTransposeFactor(float(std::exp2(-detune*gain/1200)));
+    shifter.setFormantFactor(1.0f,formants);
+    shifter.setFormantBase(float(source/rate));
+    for(int i=0;i<frames;) {
+        const int n=std::min(64,frames-i);
+        const float* in[]={input.data()+i};
+        float* dst[]={out.data()+i};
+        shifter.process(in,n,dst,n);
+        i+=n;
+    }
+    bool finite=true;double peak=0;
+    for(float v:out){finite &= std::isfinite(v);peak=std::max(peak,std::abs(double(v)));}
+    const double hz=correlationHz(out,rate,target);
+    const double cents=hz>0?1200*std::log2(hz/target):9999;
+    double best=0;
+    for(int k=-18;k<=18;k+=2)best=std::max(best,projection(out,rate,target*std::exp2(k/1200.0)));
+    const double leak=projection(out,rate,source)/std::max(best,1e-12);
+    std::cout<<"RAW_TRANSFER window="<<c.ms<<" divisor="<<c.divisor<<" split="<<c.split
+        <<" rate="<<rate<<" target="<<target<<" detune="<<detune
+        <<" formants="<<formants<<" gain="<<gain<<" cents="<<cents
+        <<" source_leak="<<leak<<" peak="<<peak
+        <<" tonal="<<(std::abs(cents)<=18 && best>.08 && leak<.15)<<"\n";
+    return finite && peak>.01 && peak<1;
 }
 int main(){
     const Candidate candidates[]={{18,4,true},{18,4,false},{16,8,true},{14,8,true},{12,8,true},{12,4,true},{10,8,true},{8,8,true},{6,8,true}};
@@ -125,5 +176,12 @@ int main(){
         for(int rate:{44100,48000})
             for(double target:{110.0,220.0,440.0})
                 for(double detune:{-35.0,35.0})safe &= probeMobile(c,rate,target,detune);
+    for(Candidate c: {Candidate{18,4,true},Candidate{12,8,true},Candidate{8,8,true}})
+        for(int rate:{44100,48000})
+            for(double target:{110.0,220.0,440.0})
+                for(double detune:{-35.0,35.0})
+                    for(bool formants:{false,true})
+                        for(double gain:{1.0,1.5,2.0})
+                            safe &= rawTransfer(c,rate,target,detune,formants,gain);
     return safe?0:1;
 }
