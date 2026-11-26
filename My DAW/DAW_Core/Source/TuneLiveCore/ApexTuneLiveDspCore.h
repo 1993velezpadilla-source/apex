@@ -30,7 +30,8 @@ public:
                  ShifterProfile profile=ShifterProfile::HighQuality40ms,
                  StudioControlClock clock=StudioControlClock::ApprovedHostChunks,
                  bool splitComputation=false,
-                 double researchWindowMs=0.0,int researchHopDivisor=4) {
+                 double researchWindowMs=0.0,int researchHopDivisor=4,
+                 int researchPhaseOffsetSamples=0) {
         profile_=profile;
         fixedClock_=clock==StudioControlClock::ResearchFixed1ms;
         rate_=std::isfinite(sampleRate) && sampleRate>8000.0 ? sampleRate : 48000.0;
@@ -64,6 +65,8 @@ public:
         delayLength_=std::max(1,latency_+1);
         delay_.assign(static_cast<std::size_t>(channels_)*delayLength_,0.0f);
         delayPosition_=0;
+        researchPhaseOffset_=std::clamp(researchPhaseOffsetSamples,0,interval-1);
+        primeSpectralPhase();
         // Capture-rate input envelope smoothing coefficient, set off the RT thread.
         envelopeAlpha_=static_cast<float>(1.0/(rate_*0.010+1.0));
         // Constant smoothing coefficients are independent of user controls.
@@ -81,6 +84,7 @@ public:
         stretch_.reset();
         std::fill(delay_.begin(),delay_.end(),0.0f);
         std::fill(wet_.begin(),wet_.end(),0.0f);
+        primeSpectralPhase();
         delayPosition_=0;
         target_=smooth_=frequency_=wetSlew_=voicedSlew_=voicedTarget_=0.0f;
         pitchActiveSlew_=needsPitchWork_=0.0f;
@@ -223,6 +227,22 @@ public:
         }
     }
 private:
+    // Research only. Start equivalent zero-history streams at different FFT
+    // phases without adding delay to the audible input. No extra allocation.
+    // Upstream long-silence fast path may re-synchronize instances; test that
+    // explicitly before using this in a real graph.
+    void primeSpectralPhase() {
+        if(researchPhaseOffset_<=0)return;
+        std::array<float,64> zeros{},discardL{},discardR{};
+        const float* in[]={zeros.data(),zeros.data()};
+        float* out[]={discardL.data(),discardR.data()};
+        for(int remaining=researchPhaseOffset_;remaining>0;) {
+            const int n=std::min(remaining,64);
+            stretch_.process(in,n,out,n);
+            remaining-=n;
+        }
+    }
+    int researchPhaseOffset_=0;
     PitchTracker tracker_;
     VoiceControl policy_;
     // Stable shifter seed makes repeated APEX offline bounces reproducible.

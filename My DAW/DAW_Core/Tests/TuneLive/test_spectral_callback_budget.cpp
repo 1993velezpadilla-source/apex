@@ -8,12 +8,14 @@
 #include <numeric>
 using namespace APEX::TuneLive;
 using Clock=std::chrono::steady_clock;
-static bool probe(int rate,int block,ShifterProfile profile,bool split,int divisor=4,int instances=1)
+static bool probe(int rate,int block,ShifterProfile profile,bool split,int divisor=4,int instances=1,bool stagger=false)
 {
     std::array<DspCore,8> cores;
     auto& core=cores[0];
+    const int hop=std::max(64,int(std::lround(rate*.018/divisor)));
     for(int j=0;j<instances;++j)
-        cores[j].prepare(rate,512,2,profile,StudioControlClock::ResearchFixed1ms,split,0.0,divisor);
+        cores[j].prepare(rate,512,2,profile,StudioControlClock::ResearchFixed1ms,split,0.0,divisor,
+                         stagger?j*hop/instances:0);
     DspSettings cfg;
     cfg.correction=cfg.wet=1;cfg.retune=cfg.humanize=cfg.flexTune=cfg.vibratoPreserve=0;
     cfg.key=1;cfg.scale=1;cfg.preserveFormants=true;
@@ -24,14 +26,15 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
         const double t=double(i)/rate;
         const double hz=t<1?252.0:(t<2?190.0:339.0);
         phase+=tau*hz*std::exp2(0.14*std::sin(tau*5*t)/12)/rate;
-        source[i]=float(0.26*std::sin(phase)+0.09*std::sin(2*phase)+0.04*std::sin(3*phase));
+        source[i]=(t>=1.25 && t<1.5)?0.0f:
+            float(0.26*std::sin(phase)+0.09*std::sin(2*phase)+0.04*std::sin(3*phase));
     }
     std::array<float,512> l{},r{};
     std::array<std::array<float,512>,8> extraL{},extraR{};
     std::vector<double> times;
     times.reserve(source.size()/block);
     const double deadline=1000.0*block/rate;
-    int misses=0;
+    int misses=0,missesAfterSilence=0;
     double peak=0,step=0,previous=0,energy=0;
     bool finite=true;
     for(int pos=0;pos+block<=int(source.size());pos+=block) {
@@ -49,9 +52,12 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
             cores[j].process(extra,2,block,cfg);
         }
         const double ms=std::chrono::duration<double,std::milli>(Clock::now()-begin).count();
-        if(pos>=rate/4){times.push_back(ms);misses+=ms>deadline;}
+        if(pos>=rate/4){times.push_back(ms);misses+=ms>deadline;
+            if(pos>=rate*1.5)missesAfterSilence+=ms>deadline;}
         for(int i=0;i<block;++i){
             finite &= std::isfinite(l[i])&&std::isfinite(r[i]);
+            for(int j=1;j<instances;++j)
+                finite &= std::isfinite(extraL[j][i])&&std::isfinite(extraR[j][i]);
             peak=std::max(peak,std::abs(double(l[i])));
             step=std::max(step,std::abs(l[i]-previous));
             energy+=double(l[i])*l[i];previous=l[i];
@@ -74,9 +80,9 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
         }
     }
     std::cout<<"SPECTRAL_BUDGET rate="<<rate<<" block="<<block<<" profile="<<int(profile)
-        <<" split="<<split<<" divisor="<<divisor<<" instances="<<instances<<" latency_samples="<<latency<<" deadline_ms="<<deadline
+        <<" split="<<split<<" divisor="<<divisor<<" instances="<<instances<<" stagger="<<stagger<<" latency_samples="<<latency<<" deadline_ms="<<deadline
         <<" p50_ms="<<p(.5)<<" p95_ms="<<p(.95)<<" p99_ms="<<p(.99)
-        <<" max_ms="<<times.back()<<" deadline_misses="<<misses<<" count="<<times.size()
+        <<" max_ms="<<times.back()<<" deadline_misses="<<misses<<" misses_after_silence="<<missesAfterSilence<<" count="<<times.size()
         <<" peak="<<peak<<" max_step="<<step<<" rms="<<std::sqrt(energy/source.size())
         <<" exact_bypass="<<aligned<<"\n";
     // Host timing is comparative telemetry, not an Android release gate.
@@ -101,5 +107,9 @@ int main(){
         for(int block:{32,64,96,128})
             for(int instances:{1,4,8})
                 ok &= probe(rate,block,ShifterProfile::Experimental18ms,false,4,instances);
+    for(int rate:{44100,48000})
+        for(int block:{32,64,96,128})
+            for(int instances:{4,8})
+                ok &= probe(rate,block,ShifterProfile::Experimental18ms,false,4,instances,true);
     return ok?0:1;
 }
