@@ -19,7 +19,7 @@ public:
         setResizable(true, true);
 #if JUCE_ANDROID
         setResizeLimits(280, 360, 1600, 1600);
-        setSize(360, 610);
+        setSize(360, processor_.usesSpectralTracking() ? 460 : 610);
 #else
         // Controls/latency readout occupy rows through y=516; a 480px
         // editor cut off the last row. Enforce a true touch-safe minimum.
@@ -28,7 +28,7 @@ public:
 #endif
 
         constexpr std::array<const char*,7> names{{
-            "CORRECTION", "RE-TUNE", "HUMANIZE", "VIBRATO", "FLEX TUNE", "STABILITY", "WET"
+            "CORRECTION", "RETUNE SPEED", "HUMANIZE", "VIBRATO", "FLEX TUNE", "STABILITY", "WET"
         }};
         for (std::size_t i=0; i<knobs_.size(); ++i) {
             auto& knob=knobs_[i];
@@ -73,6 +73,14 @@ public:
                             juce::Colour::fromRGB(224,214,228));
             title.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
             addAndMakeVisible(title);
+            if (processor_.usesSpectralTracking()) {
+                const bool visible = i==1 || i==2 || i==4;
+                knob.setVisible(visible);
+                title.setVisible(visible);
+                if(i==1)knob.setTooltip("How quickly pitch moves toward the selected note (milliseconds).");
+                if(i==2)knob.setTooltip("Keep more expression in sustained notes.");
+                if(i==4)knob.setTooltip("Allow small natural pitch deviations around the note.");
+            }
 
             auto* bound=&parameter(kKnobParameters[i]);
             knob.onDragStart=[bound](){bound->beginChangeGesture();};
@@ -144,7 +152,7 @@ public:
                            bypass_.getToggleState()?1.0f:0.0f);};
         addAndMakeVisible(bypass_);
 
-        if (processor_.isTracking()) {
+        if (processor_.isTracking() && !processor_.usesSpectralTracking()) {
             experimentalDeclick_.setButtonText("ANTI-CLICK A/B (EXPERIMENTAL)");
             experimentalDeclick_.setTooltip(
                 "Compare original Tracking (Off) against the phase-declick research variant (On). "
@@ -156,12 +164,6 @@ public:
                              experimentalDeclick_.getToggleState()?1.0f:0.0f);
             };
             addAndMakeVisible(experimentalDeclick_);
-            if (processor_.usesSpectralTracking()) {
-                experimentalDeclick_.setEnabled(false);
-                experimentalDeclick_.setTooltip(
-                    "Not applicable to the whole-signal spectral engine. "
-                    "The stored research setting is retained for project compatibility.");
-            }
         }
 
         for(int i=0;i<3;++i) {
@@ -207,6 +209,23 @@ public:
     // Child controls are repositioned with the same transform in resized().
     // Every element is real JUCE vector paint, not a flattened screenshot.
     void paint(juce::Graphics& g) override {
+        if (processor_.usesSpectralTracking()) {
+            g.fillAll(Visual::midnight());
+            const auto w=getWidth();
+            g.setColour(Visual::ivory());
+            g.setFont(juce::Font(juce::FontOptions(18.0f).withStyle("Bold")));
+            g.drawText("APEX TUNE LIVE",12,7,w-24,27,juce::Justification::centredLeft);
+            const auto h=getHeight();
+            const int half=w/2;
+            const int top=std::max(74,h*20/100);
+            g.setColour(Visual::muted());
+            g.setFont(juce::Font(juce::FontOptions(11.0f).withStyle("Bold")));
+            g.drawText("KEY",12,top,half-20,16,juce::Justification::centredLeft);
+            g.drawText("SCALE",half+5,top,half-16,16,juce::Justification::centredLeft);
+            g.drawText("VOCAL RANGE",12,top+58,half-20,16,juce::Justification::centredLeft);
+            g.drawText("REFERENCE A4",half+5,top+58,half-16,16,juce::Justification::centredLeft);
+            return;
+        }
 #if JUCE_ANDROID
         g.fillAll(Visual::midnight());
         g.setColour(Visual::ivory());
@@ -429,6 +448,31 @@ public:
     }
 
     void resized() override {
+        if (processor_.usesSpectralTracking()) {
+            const int w=getWidth(),h=getHeight(),half=w/2;
+            const int top=std::max(74,h*20/100);
+            pitchLabel_.setBounds(12,34,half-18,std::max(36,top-38));
+            pitchCaption_.setBounds(half,34,half-12,std::max(36,top-38));
+            keys_.setBounds(12,top+17,half-18,37);
+            scales_.setBounds(half+5,top+17,half-17,37);
+            ranges_.setBounds(12,top+75,half-18,37);
+            reference_.setBounds(half+5,top+75,half-17,37);
+            constexpr int indices[]{1,2,4};
+            const int cw=(w-24)/3, y=top+119;
+            const int kh=std::max(60,h-y-115);
+            for(int j=0;j<3;++j) {
+                const int i=indices[j],x=12+j*cw;
+                knobLabels_[i].setBounds(x,y,cw,20);
+                knobs_[i].setBounds(x,y+20,cw,kh-20);
+            }
+            const int footer=y+kh;
+            for(int i=0;i<3;++i)
+                styles_[i].setBounds(12+i*cw,footer+3,cw-4,32);
+            formants_.setBounds(12,footer+39,half+24,32);
+            bypass_.setBounds(half+36,footer+39,half-48,32);
+            latencyLabel_.setBounds(12,footer+75,w-24,25);
+            return;
+        }
 #if JUCE_ANDROID
         const int width = getWidth();
         const int half = width / 2;
@@ -498,12 +542,12 @@ private:
     }
     void applyStyle(VocalStyle style) {
         const auto& profile=preset(style);
-        setParameter(Processor::kAmount,profile.amount);
+        setParameter(Processor::kAmount,processor_.usesSpectralTracking()?1.0f:profile.amount);
         setParameter(Processor::kSpeed,profile.retune);
         setParameter(Processor::kHumanize,profile.humanize);
         setParameter(Processor::kVibratoPreserve,styleVibrato(style));
         setParameter(Processor::kFlexTune,profile.flexTune);
-        setParameter(Processor::kNoteStability,profile.stability);
+        setParameter(Processor::kNoteStability,processor_.usesSpectralTracking()?0.24f:profile.stability);
         setParameter(Processor::kMix,profile.mix);
         setParameter(Processor::kPreserveFormants,profile.preserveFormants?1.0f:0.0f);
         // Key + scale remain under the artist's control when switching styles.
@@ -512,7 +556,7 @@ private:
 
     float styleVibrato(VocalStyle style) const noexcept {
         constexpr std::array<float,3> vibrato{1.0f,0.70f,0.0f};
-        return processor_.isTracking() ? vibrato[static_cast<std::size_t>(style)] : 0.0f;
+        return processor_.isTracking() && !processor_.usesSpectralTracking() ? vibrato[static_cast<std::size_t>(style)] : 0.0f;
     }
 
     void timerCallback() override {
@@ -525,13 +569,13 @@ private:
         int matchingStyle=-1;
         for(int i=0;i<3;++i) {
             const auto& p=kVocalStyles[static_cast<std::size_t>(i)];
-            if(close(Processor::kAmount,p.amount)
+            if((processor_.usesSpectralTracking() || close(Processor::kAmount,p.amount))
                 && close(Processor::kSpeed,p.retune)
                 && close(Processor::kHumanize,p.humanize)
-                && close(Processor::kVibratoPreserve,styleVibrato(static_cast<VocalStyle>(i)))
+                && (processor_.usesSpectralTracking() || close(Processor::kVibratoPreserve,styleVibrato(static_cast<VocalStyle>(i))))
                 && close(Processor::kFlexTune,p.flexTune)
-                && close(Processor::kNoteStability,p.stability)
-                && close(Processor::kMix,p.mix)
+                && (processor_.usesSpectralTracking() || close(Processor::kNoteStability,p.stability))
+                && (processor_.usesSpectralTracking() || close(Processor::kMix,p.mix))
                 && close(Processor::kPreserveFormants,p.preserveFormants?1.0f:0.0f)) {
                 matchingStyle=i;
                 break;
@@ -605,8 +649,12 @@ private:
             pitchLabel_.setText("--",juce::dontSendNotification);
             pitchCaption_.setText("Waiting for monophonic voice",juce::dontSendNotification);
         }
-        latencyLabel_.setText("PLUGIN PDC    "+juce::String(processor_.getLatencyForDisplay())
-             +" samples",juce::dontSendNotification);
+        const auto rate=processor_.getSampleRate();
+        const int samples=processor_.getLatencyForDisplay();
+        const auto latencyText=rate>0.0
+            ? juce::String(1000.0*samples/rate,2)+" ms"
+            : juce::String(samples)+" samples";
+        latencyLabel_.setText("PLUGIN LATENCY   "+latencyText,juce::dontSendNotification);
         repaint(); // GUI thread only: update live pitch pointer and note styling.
     }
 

@@ -79,7 +79,7 @@ public:
         spectralTracking_(engine == Engine::Tracking && useSpectralTracking),
         tracking_(engine == Engine::Tracking && !spectralTracking_
                       ? std::make_unique<RealtimeCore>() : nullptr) {
-        add(kAmount, "tunelive.amount", "Correction Amount", 0.85f);
+        add(kAmount, "tunelive.amount", "Correction Amount", spectralTracking_?1.0f:0.85f);
         add(kSpeed, "tunelive.speed", "Retune Speed", 0.20f);
         add(kKey, "tunelive.key", "Key (C=0)", 0.0f, 12);
         add(kScale, "tunelive.scale", "Scale (0=Chromatic, 1=Major, 2=Minor)", 0.0f, 3);
@@ -92,7 +92,7 @@ public:
         add(kFlexTune, "tunelive.flexTune", "Flex Tune", 0.35f);
         add(kA4Reference, "tunelive.a4Reference", "A4 Reference (430-450 Hz)", 0.50f);
         add(kVocalRange, "tunelive.vocalRange", "Vocal Range", 0.0f, static_cast<int>(kVocalRanges.size()));
-        add(kVibratoPreserve, "tunelive.vibratoPreserve", "Vibrato Preservation", isTracking() ? 0.85f : 0.0f);
+        add(kVibratoPreserve, "tunelive.vibratoPreserve", "Vibrato Preservation", isTracking() && !spectralTracking_ ? 0.85f : 0.0f);
         // Appended ID keeps existing APEX projects and automations stable.
         // OFF by default; evaluated on two licensed human singers and not
         // promoted to the regular renderer without Android monitoring QA.
@@ -207,19 +207,19 @@ public:
 private:
     void render(juce::AudioBuffer<float>& buffer, bool hostBypass) {
         const DspSettings settings{
-            param(kAmount),
+            spectralTracking_ ? 1.0f : param(kAmount),
             430.0f+20.0f*param(kA4Reference),
             param(kSpeed),
             juce::roundToInt(param(kKey)*11.0f),
             juce::roundToInt(param(kScale)*2.0f),
-            param(kMix),
+            spectralTracking_ ? 1.0f : param(kMix),
             hostBypass || param(kBypass)>=0.5f,
             param(kHumanize),
             param(kFlexTune),
-            param(kNoteStability),
+            spectralTracking_ ? 0.24f : param(kNoteStability),
             param(kPreserveFormants)>=0.5f,
             static_cast<VocalRange>(juce::roundToInt(param(kVocalRange)*(kVocalRanges.size()-1))),
-            param(kVibratoPreserve)
+            spectralTracking_ ? 0.0f : param(kVibratoPreserve)
         };
         auto* data = buffer.getArrayOfWritePointers();
         const int channels = buffer.getNumChannels();

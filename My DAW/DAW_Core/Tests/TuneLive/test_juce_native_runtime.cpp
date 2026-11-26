@@ -86,6 +86,19 @@ int main() {
         || mobileDesc.uniqueId != Tune::kTrackingUniqueId
         || mobileTracking.getLatencySamples() != 1080)
         return fail("Android spectral Tracking identity or PDC");
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> simple(mobileTracking.createEditor());
+        int rotary=0;
+        for(auto* component:simple->getChildren()) {
+            if(auto* slider=dynamic_cast<juce::Slider*>(component);
+                slider && slider->isVisible() &&
+                slider->getSliderStyle()==juce::Slider::RotaryHorizontalVerticalDrag) ++rotary;
+            if(auto* toggle=dynamic_cast<juce::ToggleButton*>(component);
+                toggle && toggle->isVisible() && toggle->getButtonText().contains("ANTI-CLICK"))
+                return fail("obsolete anti-click research switch visible on mobile");
+        }
+        if(rotary!=3)return fail("mobile must expose exactly three main tuning knobs");
+    }
     mobileTracking.getParameters()[Tune::kBypass]->setValueNotifyingHost(1.0f);
     {
         juce::MidiBuffer midi;
