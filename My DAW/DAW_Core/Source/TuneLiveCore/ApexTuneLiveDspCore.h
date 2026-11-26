@@ -29,7 +29,8 @@ public:
     void prepare(double sampleRate,int maxBlockSize,int numChannels,
                  ShifterProfile profile=ShifterProfile::HighQuality40ms,
                  StudioControlClock clock=StudioControlClock::ApprovedHostChunks,
-                 bool splitComputation=false) {
+                 bool splitComputation=false,
+                 double researchWindowMs=0.0,int researchHopDivisor=4) {
         profile_=profile;
         fixedClock_=clock==StudioControlClock::ResearchFixed1ms;
         rate_=std::isfinite(sampleRate) && sampleRate>8000.0 ? sampleRate : 48000.0;
@@ -45,8 +46,13 @@ public:
                                       ?0.012
                                   : (profile_==ShifterProfile::Experimental18ms)
                                       ?0.018 : 0.040;
-        const int window=std::max(256,static_cast<int>(std::lround(rate_*windowSeconds)));
-        const int interval=std::max(64,static_cast<int>(std::lround(window*0.25)));
+        // Prepare-only research overrides. Default values retain the
+        // singer-approved Android 18ms/4/split path bit for bit.
+        const double seconds=std::isfinite(researchWindowMs)&&researchWindowMs>0
+            ? std::clamp(researchWindowMs,5.0,40.0)*0.001 : windowSeconds;
+        const int window=std::max(256,static_cast<int>(std::lround(rate_*seconds)));
+        const int interval=std::max(64,static_cast<int>(std::lround(
+            double(window)/std::clamp(researchHopDivisor,4,8))));
         // Research opt-in only: distribute spectral work across the hop.
         // The library reports the added interval in outputLatency().
         stretch_.configure(channels_,window,interval,splitComputation);
