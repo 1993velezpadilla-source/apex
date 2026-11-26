@@ -68,6 +68,115 @@ void run(RealtimeCore& engine, std::vector<float>& audio, const DspSettings& set
     }
 }
 
+
+// Compare the same input under mobile-sized and irregular host callbacks.
+// Changes in key/mix/retune are aligned to the same sample clock.
+bool testMobileCallbackPartition()
+{
+    constexpr std::array<int, 9> blocks{{32,48,64,96,128,160,192,256,512}};
+    for (const int rate : {44100,48000,96000})
+    {
+        const int length = rate / 2;
+        auto dry = makeVoice(rate, 228.0, length);
+        for (int i = rate / 5; i < rate / 5 + rate / 100; ++i)
+            dry[static_cast<std::size_t>(i)] = 0.0f;
+        auto baseline = dry;
+        auto candidate = dry;
+        RealtimeCore fixed, varied;
+        fixed.prepare(rate,1);
+        varied.prepare(rate,1);
+        auto settings = hardTune();
+        std::size_t index = 0;
+        const int checkpoint = rate / 10;
+        for (int start = 0; start < length; start += checkpoint)
+        {
+            const int end = std::min(length,start+checkpoint);
+            settings.key = start < rate/5 ? 0 : 9;
+            settings.scale = 1;
+            settings.wet = start < rate/4 ? 1.0f : 0.65f;
+            settings.retune = start < rate/5 ? 0.0f : 0.2f;
+            float* a[]{baseline.data()+start};
+            fixed.process(a,1,end-start,settings);
+            for (int pos=start; pos<end;)
+            {
+                const int count=std::min(end-pos,blocks[index++%blocks.size()]);
+                float* b[]{candidate.data()+pos};
+                varied.process(b,1,count,settings);
+                pos+=count;
+            }
+        }
+        double peakDifference=0.0;
+        for(int i=0;i<length;++i)
+        {
+            if(!std::isfinite(baseline[i]) || !std::isfinite(candidate[i]))
+                return false;
+            peakDifference=std::max(peakDifference,std::abs(double(baseline[i])-candidate[i]));
+        }
+        std::cout<<"TRACKING_MOBILE_PARTITION rate="<<rate<<" peak_diff="<<peakDifference<<"\n";
+        if(peakDifference>1.0e-5 || fixed.latencySamples()!=0 || varied.latencySamples()!=0)
+            return false;
+    }
+    return true;
+}
+
+
+// Reproduce the reported C# major / Hard Tune / 100% Wet case. An
+// independent tone projection measures leaked source F0, not just the
+// detector's estimate of the loudest output note.
+double toneProjection(const std::vector<float>& audio,int rate,double hz)
+{
+    double re=0.0,im=0.0,weight=0.0;
+    const int start=rate/2, count=static_cast<int>(audio.size())-start;
+    for(int i=0;i<count;++i)
+    {
+        const double w=0.5-0.5*std::cos(tau*i/(count-1));
+        const double phase=tau*hz*(start+i)/rate;
+        re+=w*audio[static_cast<std::size_t>(start+i)]*std::cos(phase);
+        im+=w*audio[static_cast<std::size_t>(start+i)]*std::sin(phase);
+        weight+=w;
+    }
+    return 2.0*std::hypot(re,im)/weight;
+}
+bool testVoicedReplacement()
+{
+    bool ok=true;
+    for(int rate : {44100,48000,96000})
+    {
+        const double source=252.0, target=261.6255653;
+        auto dry=makeVoice(rate,source,rate*2);
+        auto legacy=dry, tuned=dry, bypass=dry;
+        RealtimeCore reference,candidate,neutral;
+        reference.prepare(rate,1);
+        candidate.setVoicedReplacement(true);
+        candidate.prepare(rate,1);
+        neutral.setVoicedReplacement(true);
+        neutral.prepare(rate,1);
+        auto settings=hardTune();
+        settings.key=1; settings.scale=1; settings.wet=1.0f;
+        run(reference,legacy,settings,96);
+        run(candidate,tuned,settings,96);
+        settings.bypass=true;
+        run(neutral,bypass,settings,96);
+        const double oldLeak=toneProjection(legacy,rate,source);
+        const double newLeak=toneProjection(tuned,rate,source);
+        const double corrected=toneProjection(tuned,rate,target);
+        double peak=0.0;
+        for(float sample:tuned)
+        {
+            if(!std::isfinite(sample))return false;
+            peak=std::max(peak,std::abs(double(sample)));
+        }
+        std::cout<<"VOICED_REPLACEMENT rate="<<rate<<" legacy_source_f0="<<oldLeak
+                 <<" replacement_source_f0="<<newLeak<<" corrected_f0="<<corrected
+                 <<" peak="<<peak<<"\n";
+        // Do not accept reduced dry simply by silencing the voice. Also
+        // preserve exact dry bypass and reject unexpected signal peaks.
+        ok=ok && newLeak<=oldLeak+0.002 && newLeak<0.25*corrected
+              && corrected>0.10 && peak<0.8 && bypass==dry;
+    }
+    return ok;
+}
+
 // Independent measurement on emitted PCM within the expected tone's range.
 double measuredCents(const std::vector<float>& audio, int rate, double target) {
     const double expectedLag = static_cast<double>(rate) / target;
@@ -96,7 +205,7 @@ double measuredCents(const std::vector<float>& audio, int rate, double target) {
     return 1200.0 * std::log2(expectedLag / (bestLag + fraction));
 }
 
-bool testPitchAndOnset(bool research=false) {
+bool testPitchAndOnset(bool research=false, bool replacement=false) {
     const auto settings = hardTune();
     for (const int rate : {44100, 48000, 96000, 192000}) {
         constexpr std::array<double, 5> notes{65.4063913, 110.0, 195.997718, 440.0, 830.609395};
@@ -106,7 +215,8 @@ bool testPitchAndOnset(bool research=false) {
             const auto dry = makeVoice(rate, target * std::exp2(offsets[note] / 1200.0), rate);
             auto wet = dry;
             RealtimeCore engine;
-            engine.prepare(rate, 1);
+            engine.setVoicedReplacement(replacement);
+    engine.prepare(rate, 1);
         engine.setResearchPhaseSlew(research);
             run(engine, wet, settings, 127);
             int changed = 0;
@@ -124,7 +234,7 @@ bool testPitchAndOnset(bool research=false) {
     return true;
 }
 
-bool testFastestRetune(bool research=false) {
+bool testFastestRetune(bool research=false, bool replacement=false) {
     const auto original = hardTune();
     const auto processSample = [](RealtimeCore& engine, float sample, const DspSettings& settings) {
         float* channels[]{&sample};
@@ -140,9 +250,11 @@ bool testFastestRetune(bool research=false) {
             const auto dry = makeVoice(rate, note * std::exp2(32.0 / 1200.0), rate / 8);
             auto settings = original;
             RealtimeCore tuning, unchanged;
-            tuning.prepare(rate, 1);
+            tuning.setVoicedReplacement(replacement);
+    tuning.prepare(rate, 1);
         tuning.setResearchPhaseSlew(research);
-            unchanged.prepare(rate, 1);
+            unchanged.setVoicedReplacement(replacement);
+    unchanged.prepare(rate, 1);
         unchanged.setResearchPhaseSlew(research);
             int acquired = -1, retarget = -1;
             int accepted = -1, applied = -1, changed = -1;
@@ -192,7 +304,7 @@ bool testFastestRetune(bool research=false) {
     return cases == 50;
 }
 
-bool testNoteTransitions(bool research=false) {
+bool testNoteTransitions(bool research=false, bool replacement=false) {
     constexpr int rate = 48000;
     constexpr int transition = rate * 2 / 5;
     constexpr int length = transition + rate / 8;
@@ -202,6 +314,7 @@ bool testNoteTransitions(bool research=false) {
     }};
     const auto settings = hardTune();
     RealtimeCore engine;
+    engine.setVoicedReplacement(replacement);
     engine.prepare(rate, 1);
         engine.setResearchPhaseSlew(research);
     std::vector<float> dry(length);
@@ -310,7 +423,7 @@ bool testBypassAtBankRelease() {
     return exercised>0 && worst<2e-6;
 }
 
-bool testTimelineAndReset(bool research=false) {
+bool testTimelineAndReset(bool research=false, bool replacement=false) {
     constexpr int rate = 48000;
     constexpr int impulsePosition = 14399;
     const auto settings = hardTune();
@@ -318,10 +431,13 @@ bool testTimelineAndReset(bool research=false) {
     auto a = dry, b = dry, hit = dry;
     hit[impulsePosition] += 0.11f;
     RealtimeCore fixed, alternate, transient;
+    fixed.setVoicedReplacement(replacement);
     fixed.prepare(rate, 1);
         fixed.setResearchPhaseSlew(research);
+    alternate.setVoicedReplacement(replacement);
     alternate.prepare(rate, 1);
         alternate.setResearchPhaseSlew(research);
+    transient.setVoicedReplacement(replacement);
     transient.prepare(rate, 1);
         transient.setResearchPhaseSlew(research);
     run(fixed, a, settings, 128);
@@ -345,7 +461,7 @@ bool testTimelineAndReset(bool research=false) {
     return a == b;
 }
 
-bool testVibrato(bool research=false) {
+bool testVibrato(bool research=false, bool replacement=false) {
     constexpr int rate = 48000;
     auto plain = hardTune(), preserve = plain;
     plain.stability = preserve.stability = 0.8f;
@@ -360,6 +476,7 @@ bool testVibrato(bool research=false) {
     }
     auto hard = dry, expressive = dry;
     RealtimeCore engine;
+    engine.setVoicedReplacement(replacement);
     engine.prepare(rate, 1);
         engine.setResearchPhaseSlew(research);
     run(engine, hard, plain, 128);
@@ -389,14 +506,15 @@ bool testVibrato(bool research=false) {
            && natural[1] > 1.7 * fixed[1] && std::abs(natural[0]) < 10.0;
 }
 
-bool testRealtimeSafety(bool research=false) {
+bool testRealtimeSafety(bool research=false, bool replacement=false) {
     constexpr int rate = 48000, block = 128, inserts = 8, blocks = 375;
     const auto source = makeVoice(rate, 113.1, block * blocks);
     std::array<RealtimeCore, inserts> engines;
     std::array<double, blocks> times{};
     bool clean = true;
     for (auto& engine : engines) {
-        engine.prepare(rate, 2);
+        engine.setVoicedReplacement(replacement);
+    engine.prepare(rate, 2);
         engine.setResearchPhaseSlew(research);
     }
     auto settings = hardTune();
@@ -522,7 +640,7 @@ bool testExperimentalToggleDefersUntilUnvoiced() {
     return !engine.researchPhaseSlewEnabledForTest();
 }
 
-bool testDetectorDropoutStability(bool research=false) {
+bool testDetectorDropoutStability(bool research=false, bool replacement=false) {
     constexpr int rate = 48000;
     auto dry = makeVoice(rate, 447.691, rate * 2);
     // Airy singing: a brief 8-ms unvoiced hole followed by a later real
@@ -533,6 +651,7 @@ bool testDetectorDropoutStability(bool research=false) {
     std::fill(dry.begin() + longBegin, dry.begin() + longEnd, 0.0f);
     auto wet = dry;
     RealtimeCore engine;
+    engine.setVoicedReplacement(replacement);
     engine.prepare(rate, 1);
         engine.setResearchPhaseSlew(research);
     const auto settings = hardTune();
@@ -570,6 +689,8 @@ bool testDetectorDropoutStability(bool research=false) {
 } // namespace
 
 int main() {
+    if (!testMobileCallbackPartition()) return 1;
+    if (!testVoicedReplacement()) { std::cerr<<"Full wet source-F0 leakage or bypass regression\n"; return 19; }
     if (!testPitchAndOnset()) { std::cerr << "Tracking output pitch or onset\n"; return 1; }
     if (!testFastestRetune()) { std::cerr << "Fastest retune time after a detected target\n"; return 6; }
     if (!testBypassAtBankRelease()) { std::cerr << "Bypass truncated outgoing correction fade\\n"; return 9; }
@@ -589,5 +710,17 @@ int main() {
     if (!testNoteTransitions(true)) { std::cerr<<"Phase mode note transitions\\n"; return 16; }
     if (!testDetectorDropoutStability(true)) { std::cerr<<"Phase mode dropout\\n"; return 17; }
     std::cout<<"PHASE_MODE_EXTENDED_REGRESSION_PASS\\n";
+    // The native shipping processor enables voiced replacement. Exercise
+    // that exact mode, not only the historical comparison engine.
+    std::cout<<"SHIPPING_REPLACEMENT_EXTENDED_BEGIN\n";
+    if (!testPitchAndOnset(false,true)) return 20;
+    if (!testFastestRetune(false,true)) return 21;
+    if (!testTimelineAndReset(false,true)) return 22;
+    if (!testRealtimeSafety(false,true)) return 23;
+    if (!testVibrato(false,true)) return 24;
+    if (!testNoteTransitions(false,true)) return 25;
+    if (!testDetectorDropoutStability(false,true)) return 26;
+    std::cout<<"SHIPPING_REPLACEMENT_EXTENDED_PASS\n";
+
     if (!testExperimentalToggleDefersUntilUnvoiced()) { std::cerr << "Experimental A/B mode switch must wait for silence\n"; return 8; }
 }

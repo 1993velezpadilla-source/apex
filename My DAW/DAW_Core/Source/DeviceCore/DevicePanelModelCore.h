@@ -123,14 +123,28 @@ public:
         return DeviceCapability::formatBufferSizeLabel (bufferSize);
     }
 
+    static bool usesAndroidOboeCapabilities(const juce::String& typeName)
+    {
+        return typeName.containsIgnoreCase("Oboe");
+    }
+
+    static juce::String rateBufferCapabilityKey(const juce::String& typeName,
+                                                 const juce::String& outputDeviceName,
+                                                 const juce::String& inputDeviceName)
+    {
+        const auto key = typeName + "||" + outputDeviceName;
+        return usesAndroidOboeCapabilities(typeName) ? key + "||" + inputDeviceName : key;
+    }
+
     /** Sample rates the named device actually reports, intersected with the
         professional set. Fast path reads the currently open device; otherwise
         probes once via a temporary device (cached per panel session). */
     juce::Array<double> getAvailableSampleRates(const juce::String& typeName,
-                                                const juce::String& outputDeviceName) const
+                                                const juce::String& outputDeviceName,
+                                                const juce::String& inputDeviceName = {}) const
     {
-        probeRateAndBufferCaches (typeName, outputDeviceName);
-        if (auto it = sampleRateCache_.find (typeName + "||" + outputDeviceName); it != sampleRateCache_.end())
+        probeRateAndBufferCaches (typeName, outputDeviceName, inputDeviceName);
+        if (auto it = sampleRateCache_.find (rateBufferCapabilityKey(typeName, outputDeviceName, inputDeviceName)); it != sampleRateCache_.end())
             return it->second;
         return {};
     }
@@ -138,10 +152,11 @@ public:
     /** Buffer sizes the named device actually reports, intersected with the
         supported ladder (32 only when the driver reports it). */
     juce::Array<int> getAvailableBufferSizes(const juce::String& typeName,
-                                             const juce::String& outputDeviceName) const
+                                             const juce::String& outputDeviceName,
+                                             const juce::String& inputDeviceName = {}) const
     {
-        probeRateAndBufferCaches (typeName, outputDeviceName);
-        if (auto it = bufferSizeCache_.find (typeName + "||" + outputDeviceName); it != bufferSizeCache_.end())
+        probeRateAndBufferCaches (typeName, outputDeviceName, inputDeviceName);
+        if (auto it = bufferSizeCache_.find (rateBufferCapabilityKey(typeName, outputDeviceName, inputDeviceName)); it != bufferSizeCache_.end())
             return it->second;
         return {};
     }
@@ -254,9 +269,12 @@ private:
     /** One probe per type+device per panel session fills BOTH caches.
         Mirrors the getOutputChannelChoices fast-path/temp-device pattern:
         never blocks more than once per device per panel open. */
-    void probeRateAndBufferCaches(const juce::String& typeName, const juce::String& outputDeviceName) const
+    void probeRateAndBufferCaches(const juce::String& typeName,
+                                  const juce::String& outputDeviceName,
+                                  const juce::String& inputDeviceName) const
     {
-        const auto cacheKey = typeName + "||" + outputDeviceName;
+        const bool oboe = usesAndroidOboeCapabilities(typeName);
+        const auto cacheKey = rateBufferCapabilityKey(typeName, outputDeviceName, inputDeviceName);
         if (probedCapabilityKeys_.count(cacheKey) > 0)
             return;
         probedCapabilityKeys_.insert(cacheKey);
@@ -269,17 +287,27 @@ private:
             if (device == nullptr)
                 return;
             rates = device->getAvailableSampleRates();
-            sizes = device->getAvailableBufferSizes();
+            if (!oboe || !rates.isEmpty())
+                sizes = device->getAvailableBufferSizes();
         };
 
         // Fast path: the requested device is already open — read directly,
         // no temporary ASIO device, no blocking.
+        juce::AudioDeviceManager::AudioDeviceSetup activeSetup;
+        dm_.getAudioDeviceSetup(activeSetup);
         if (auto* current = dm_.getCurrentAudioDevice();
             current != nullptr
                 && dm_.getCurrentAudioDeviceType() == typeName
-                && current->getName() == outputDeviceName)
+                && (oboe ? (activeSetup.outputDeviceName == outputDeviceName
+                             && activeSetup.inputDeviceName == inputDeviceName)
+                         : current->getName() == outputDeviceName))
         {
             readCaps(current);
+            if (oboe && current->isOpen())
+            {
+                rates.addIfNotAlreadyThere(current->getCurrentSampleRate());
+                sizes.addIfNotAlreadyThere(current->getCurrentBufferSizeSamples());
+            }
         }
         else if (auto* type = findType(typeName))
         {
@@ -287,12 +315,21 @@ private:
             // Statement form (proven pattern at getOutputChannelChoices): a
             // condition-declaration wrapping createDevice(.., {}) fails to
             // parse on MSVC (C2059 at the brace-init argument).
-            std::unique_ptr<juce::AudioIODevice> temp(type->createDevice(outputDeviceName, {}));
+            auto probeInput = oboe ? inputDeviceName : juce::String{};
+            if (oboe && probeInput.isEmpty() && type->hasSeparateInputsAndOutputs())
+            {
+                const auto inputs = type->getDeviceNames(true);
+                if (!inputs.isEmpty())
+                    probeInput = inputs[juce::jlimit(0, inputs.size() - 1, type->getDefaultDeviceIndex(true))];
+            }
+            std::unique_ptr<juce::AudioIODevice> temp(type->createDevice(outputDeviceName, probeInput));
             readCaps(temp.get());
         }
 
-        sampleRateCache_[cacheKey] = intersectProfessionalRates(rates);
-        bufferSizeCache_[cacheKey] = filterSupportedBufferSizes(sizes);
+        sampleRateCache_[cacheKey] = oboe ? DeviceCapability::androidReportedSampleRates(rates)
+                                          : intersectProfessionalRates(rates);
+        bufferSizeCache_[cacheKey] = oboe ? DeviceCapability::androidReportedBufferSizes(sizes)
+                                          : filterSupportedBufferSizes(sizes);
     }
 
     static bool isAsioType(const juce::String& typeName)

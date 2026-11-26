@@ -61,11 +61,25 @@ public:
                  kHumanize, kNoteStability, kPreserveFormants, kFlexTune, kA4Reference,
                  kVocalRange, kVibratoPreserve, kExperimentalDeclick, kNumParams };
 
-    explicit Processor(Engine engine = Engine::Studio) : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
+    // Android field QA rejected the harmonic residual engine. Retain
+    // stable insert identity, but run a whole-signal pitch shifter there.
+    // Explicit override lets linked desktop tests exercise the same path.
+    static constexpr bool defaultSpectralTracking =
+   #if JUCE_ANDROID
+        true;
+   #else
+        false;
+   #endif
+    explicit Processor(Engine engine = Engine::Studio,
+                       bool useSpectralTracking = defaultSpectralTracking)
+        : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-        tracking_(engine == Engine::Tracking ? std::make_unique<RealtimeCore>() : nullptr) {
-        add(kAmount, "tunelive.amount", "Correction Amount", 0.85f);
+        engine_(engine),
+        spectralTracking_(engine == Engine::Tracking && useSpectralTracking),
+        tracking_(engine == Engine::Tracking && !spectralTracking_
+                      ? std::make_unique<RealtimeCore>() : nullptr) {
+        add(kAmount, "tunelive.amount", "Correction Amount", spectralTracking_?1.0f:0.85f);
         add(kSpeed, "tunelive.speed", "Retune Speed", 0.20f);
         add(kKey, "tunelive.key", "Key (C=0)", 0.0f, 12);
         add(kScale, "tunelive.scale", "Scale (0=Chromatic, 1=Major, 2=Minor)", 0.0f, 3);
@@ -78,13 +92,14 @@ public:
         add(kFlexTune, "tunelive.flexTune", "Flex Tune", 0.35f);
         add(kA4Reference, "tunelive.a4Reference", "A4 Reference (430-450 Hz)", 0.50f);
         add(kVocalRange, "tunelive.vocalRange", "Vocal Range", 0.0f, static_cast<int>(kVocalRanges.size()));
-        add(kVibratoPreserve, "tunelive.vibratoPreserve", "Vibrato Preservation", isTracking() ? 0.85f : 0.0f);
+        add(kVibratoPreserve, "tunelive.vibratoPreserve", "Vibrato Preservation", isTracking() && !spectralTracking_ ? 0.85f : 0.0f);
         // Appended ID keeps existing APEX projects and automations stable.
         // OFF by default; evaluated on two licensed human singers and not
         // promoted to the regular renderer without Android monitoring QA.
         add(kExperimentalDeclick, "tunelive.experimentalDeclick", "Anti-Click A/B Research", 0.0f, 2);
     }
-    bool isTracking() const noexcept { return tracking_ != nullptr; }
+    bool isTracking() const noexcept { return engine_ == Engine::Tracking; }
+    bool usesSpectralTracking() const noexcept { return spectralTracking_; }
     const juce::String getName() const override { return isTracking() ? kTrackingName : kPluginName; }
     static juce::PluginDescription descriptionFor(Engine engine) {
         const bool tracking = engine == Engine::Tracking;
@@ -115,11 +130,21 @@ public:
         setRateAndBufferSizeDetails(rate,block);
         int latency = 0;
         if (tracking_) {
+            tracking_->setVoicedReplacement(true);
             tracking_->prepare(rate, channels);
             tracking_->setResearchPhaseSlew(param(kExperimentalDeclick) >= 0.5f);
             latency = tracking_->latencySamples();
         } else {
-            dsp_.prepare(rate, block, channels);
+            // Android candidate: the measured 18-ms profile had better
+            // sustained-note accuracy than 40/12 ms. Spread spectral
+            // computation across its hop; disclose actual 22.5-ms PDC.
+            // Legacy Studio and desktop Tracking retain their engines.
+            dsp_.prepare(rate, block, channels,
+                spectralTracking_ ? ShifterProfile::Experimental18ms
+                                  : ShifterProfile::HighQuality40ms,
+                spectralTracking_ ? StudioControlClock::ResearchFixed1ms
+                                  : StudioControlClock::ApprovedHostChunks,
+                spectralTracking_);
             latency = dsp_.latencySamples();
         }
         latencyForDisplay_.store(latency, std::memory_order_relaxed);
@@ -182,19 +207,19 @@ public:
 private:
     void render(juce::AudioBuffer<float>& buffer, bool hostBypass) {
         const DspSettings settings{
-            param(kAmount),
+            spectralTracking_ ? 1.0f : param(kAmount),
             430.0f+20.0f*param(kA4Reference),
             param(kSpeed),
             juce::roundToInt(param(kKey)*11.0f),
             juce::roundToInt(param(kScale)*2.0f),
-            param(kMix),
+            spectralTracking_ ? 1.0f : param(kMix),
             hostBypass || param(kBypass)>=0.5f,
             param(kHumanize),
             param(kFlexTune),
-            param(kNoteStability),
+            spectralTracking_ ? 0.24f : param(kNoteStability),
             param(kPreserveFormants)>=0.5f,
             static_cast<VocalRange>(juce::roundToInt(param(kVocalRange)*(kVocalRanges.size()-1))),
-            param(kVibratoPreserve)
+            spectralTracking_ ? 0.0f : param(kVibratoPreserve)
         };
         auto* data = buffer.getArrayOfWritePointers();
         const int channels = buffer.getNumChannels();
@@ -228,6 +253,8 @@ private:
     std::array<TuneLiveParameter*,kNumParams> params_{};
     // Engine choice is a stable native insert identity, fixed before prepare.
     DspCore dsp_;
+    const Engine engine_;
+    const bool spectralTracking_;
     const std::unique_ptr<RealtimeCore> tracking_;
     std::atomic<float> lastHz_{0.0f}, lastShift_{0.0f};
     std::atomic<int> latencyForDisplay_{0};

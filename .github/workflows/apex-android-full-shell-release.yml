@@ -8,6 +8,9 @@ on:
       - "feature/mobile-portrait-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
+      - "Android/scripts/enable_oboe_low_buffer_requests.py"
+      - "Android/Source/ApexOboeInputContinuity.h"
+      - "Android/Tests/ApexOboeInputContinuityTests.cpp"
       - "Android/scripts/enable_immersive_fullscreen.py"
       - "Android/scripts/configure_android_frame_tiles.py"
       - "Android/scripts/pin_full_exporter_ndk.py"
@@ -83,6 +86,9 @@ jobs:
           mkdir -p third_party
           git clone --quiet --depth 1 --branch 8.0.12 \
             https://github.com/juce-framework/JUCE.git third_party/JUCE
+          python3 Android/scripts/enable_oboe_low_buffer_requests.py third_party/JUCE
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Android/Tests/ApexOboeInputContinuityTests.cpp -o /tmp/apex-oboe-continuity
+          /tmp/apex-oboe-continuity
 
       - name: Restore pinned JUCE Projucer cache
         id: projucer-cache

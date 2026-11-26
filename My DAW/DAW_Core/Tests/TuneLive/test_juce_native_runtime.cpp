@@ -75,7 +75,88 @@ int main() {
 
     // The new insert has its own fixed PDC and automatable range controls.
     using Tune = APEX::TuneLive::Processor;
-    Tune tracking(Tune::Engine::Tracking);
+    Tune tracking(Tune::Engine::Tracking, false);
+    // Exact engine selected by Android, exercised in this linked JUCE test.
+    Tune mobileTracking(Tune::Engine::Tracking, true);
+    mobileTracking.prepareToPlay(48000.0,128);
+    juce::PluginDescription mobileDesc;
+    mobileTracking.fillInPluginDescription(mobileDesc);
+    if (!mobileTracking.usesSpectralTracking() || !mobileTracking.isTracking()
+        || mobileDesc.fileOrIdentifier != Tune::kTrackingIdentifier
+        || mobileDesc.uniqueId != Tune::kTrackingUniqueId
+        || mobileTracking.getLatencySamples() != 1080)
+        return fail("Android spectral Tracking identity or PDC");
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> simple(mobileTracking.createEditor());
+        int rotary=0;
+        bool vocalRangeFound=false;
+        simple->setSize(320,360);
+        for(auto* component:simple->getChildren()) {
+            if(component->isVisible() && !simple->getLocalBounds().contains(component->getBounds()))
+                return fail("compact mobile editor clips a visible control");
+            if(auto* range=dynamic_cast<juce::ComboBox*>(component);
+                range && range->isVisible() && range->getNumItems()==4 &&
+                range->getItemText(1)=="Baritone / Bass" &&
+                range->getItemText(2)=="Alto / Tenor" &&
+                range->getItemText(3)=="Soprano") vocalRangeFound=true;
+            if(auto* button=dynamic_cast<juce::TextButton*>(component);
+                button && button->isVisible() &&
+                (button->getButtonText()=="NATURAL" || button->getButtonText()=="MODERN" ||
+                 button->getButtonText()=="HARD TUNE"))
+                return fail("obsolete style presets visible in mobile editor");
+            if(auto* slider=dynamic_cast<juce::Slider*>(component);
+                slider && slider->isVisible() && slider->getSliderStyle()==juce::Slider::LinearHorizontal)
+                return fail("unnecessary A4 reference slider visible in mobile editor");
+            if(auto* slider=dynamic_cast<juce::Slider*>(component);
+                slider && slider->isVisible() &&
+                slider->getSliderStyle()==juce::Slider::RotaryHorizontalVerticalDrag) ++rotary;
+            if(auto* toggle=dynamic_cast<juce::ToggleButton*>(component);
+                toggle && toggle->isVisible() && toggle->getButtonText().contains("ANTI-CLICK"))
+                return fail("obsolete anti-click research switch visible on mobile");
+        }
+        if(rotary!=3 || !vocalRangeFound)return fail("mobile controls or familiar vocal range labels missing");
+        juce::TextButton* advanced=nullptr;
+        juce::Slider* detune=nullptr;
+        for(auto* component:simple->getChildren()) {
+            if(auto* button=dynamic_cast<juce::TextButton*>(component);
+                button && button->getButtonText()=="ADVANCED")advanced=button;
+            if(auto* slider=dynamic_cast<juce::Slider*>(component);
+                slider && slider->getSliderStyle()==juce::Slider::LinearHorizontal)detune=slider;
+        }
+        if(!advanced || !detune || detune->isVisible() ||
+            std::abs(detune->getValue()-0.5)>0.0001)
+            return fail("advanced Detune default 440 Hz or visibility");
+        advanced->onClick();
+        if(!detune->isVisible() || advanced->getButtonText()!="DONE")
+            return fail("advanced Detune cannot be opened");
+        for(auto* component:simple->getChildren())
+            if(component->isVisible() && !simple->getLocalBounds().contains(component->getBounds()))
+                return fail("advanced editor clips a visible control");
+        detune->setValue(0.1,juce::sendNotificationSync);
+        if(std::abs(mobileTracking.getParameters()[Tune::kA4Reference]->getValue()-0.1f)>0.0001f)
+            return fail("Detune did not drive the existing concert pitch parameter");
+        detune->setValue(0.5,juce::sendNotificationSync);
+        advanced->onClick();
+        if(detune->isVisible() || advanced->getButtonText()!="ADVANCED")
+            return fail("advanced Detune cannot be closed");
+    }
+    mobileTracking.getParameters()[Tune::kBypass]->setValueNotifyingHost(1.0f);
+    {
+        juce::MidiBuffer midi;
+        juce::AudioBuffer<float> samples(2,128);
+        for (int block=0;block<32;++block) {
+            for(int ch=0;ch<2;++ch)
+                for(int i=0;i<128;++i)
+                    samples.setSample(ch,i,(block==0 && i==0)?0.5f:0.0f);
+            mobileTracking.processBlock(samples,midi);
+            for(int ch=0;ch<2;++ch)
+                for(int i=0;i<128;++i) {
+                    const auto expected = block*128+i==1080 ? 0.5f : 0.0f;
+                    if(std::abs(samples.getSample(ch,i)-expected)>1.0e-6f)
+                        return fail("Android spectral Tracking bypass PDC mismatch");
+                }
+        }
+    }
     juce::PluginDescription trackingDescription;
     tracking.fillInPluginDescription(trackingDescription);
     tracking.prepareToPlay(48000.0,128);

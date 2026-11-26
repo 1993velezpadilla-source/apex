@@ -12,10 +12,12 @@
 namespace {
 constexpr int kRate=48000,kFrames=3*kRate,kPrepareBlock=128;
 constexpr double kPi=3.14159265358979323846;
-bool probe(int channels) {
+bool probe(int channels, bool mobile=false, bool split=false) {
     using namespace APEX::TuneLive;
     DspCore effect;
-    effect.prepare(kRate,kPrepareBlock,channels);
+    effect.prepare(kRate,kPrepareBlock,channels,
+        mobile ? ShifterProfile::Experimental18ms : ShifterProfile::HighQuality40ms,
+        mobile ? StudioControlClock::ResearchFixed1ms : StudioControlClock::ApprovedHostChunks,split);
     std::vector<float> left(kFrames),right(kFrames),copyLeft,copyRight;
     double phase=0.0;
     for(int i=0;i<kFrames;++i) {
@@ -37,7 +39,11 @@ bool probe(int channels) {
         // Don't span the three stage boundaries; automation changes only
         // between host callbacks, as expected from JUCE parameter snapshots.
         const int stageEnd=std::min(kFrames,(i/kRate+1)*kRate);
-        const int n=std::min(count,stageEnd-i);
+        // Mobile comparison uses exact automation sample positions; otherwise
+        // differing callback partitions would also move the automation events.
+        const int eventEnd=mobile && i>=kRate && i<2*kRate
+            ? std::min(stageEnd,(i/1024+1)*1024):stageEnd;
+        const int n=std::min(count,eventEnd-i);
         DspSettings control;
         control.wet=1.0f;
         control.retune=0.0f;
@@ -99,19 +105,25 @@ bool probe(int channels) {
                          -copyRight[static_cast<std::size_t>(i-latency)]));
     }
     std::cout<<"TUNE_LIVE_AUTOMATION_STRESS channels="<<channels
+             <<" mobile="<<mobile<<" split="<<split
              <<" processed_samples="<<processed
              <<" PDC="<<latency
              <<" final_neutral_max_error="<<worstDryDifference
              <<" max_adjacent_step_observed="<<maximumAdjacent
              <<" output_peak="<<peak<<"\\n";
-    return processed==kFrames && latency==1920 && peak>0 && peak<8.0 &&
+    const int expected=mobile?(split?1080:864):1920;
+    return processed==kFrames && latency==expected && peak>0 && peak<8.0 &&
            worstDryDifference<1.0e-5;
 }
 }
 int main() {
     const bool mono=probe(1);
     const bool stereo=probe(2);
-    if(!mono || !stereo) {
+    bool mobile=true;
+    for(int channels:{1,2})
+        for(bool split:{false,true})
+            mobile &= probe(channels,true,split);
+    if(!mono || !stereo || !mobile) {
         std::cerr<<"FAIL automation hot-switch or final neutral transparency\\n";
         return 1;
     }

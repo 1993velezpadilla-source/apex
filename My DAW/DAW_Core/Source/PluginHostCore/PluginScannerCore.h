@@ -389,8 +389,9 @@ private:
     // APEX Tune Live remains intrinsic, including after a clean rescan.
     void seedNativeTuneLiveEntry()
     {
-        cache_.cacheFromDescription (
-            DAW::ApexNativePluginFormat::createTuneLiveDescription());
+        // Remove the retired Studio entry even on upgrades with an old cache.
+        // The native format still restores existing Studio instances unchanged.
+        cache_.remove(APEX::TuneLive::Processor::kFileOrIdentifier);
         cache_.cacheFromDescription (DAW::ApexNativePluginFormat::createTuneLiveDescription (
             APEX::TuneLive::Processor::Engine::Tracking));
     }

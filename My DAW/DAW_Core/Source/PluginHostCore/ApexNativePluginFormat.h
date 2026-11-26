@@ -82,7 +82,8 @@ public:
         APEX::Reverie::Processor reveriePrototype;
         reveriePrototype.fillInPluginDescription(reverie);
         results.add(new juce::PluginDescription(reverie));
-        results.add (new juce::PluginDescription (createTuneLiveDescription()));
+        // Only the zero-PDC Tracking engine is offered for new inserts.
+        // Keep Studio's original identity in the restoration factory below.
         results.add (new juce::PluginDescription (
             createTuneLiveDescription (APEX::TuneLive::Processor::Engine::Tracking)));
     }

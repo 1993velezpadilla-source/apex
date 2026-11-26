@@ -185,6 +185,17 @@ jobs:
           grep -q 'profile=high' VOCADITO_REGISTER_MATRIX_LICENSE.txt
           test -s vocadito_low_PITCH_COMPARISON.txt
           test -s vocadito_high_PITCH_COMPARISON.txt
+      - name: Publish aligned Android spectral C sharp major real singer comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-spectral-real-singers-aligned-ab
+          path: |
+            vocadito_*_source.wav
+            vocadito_*_mobile_Csharp_major_*.wav
+            VOCADITO_LICENSE_AND_EVIDENCE.txt
+            VOCADITO_REGISTER_MATRIX_LICENSE.txt
+          if-no-files-found: error
+          retention-days: 14
       - name: Compare production Tracking before and after harmonic taper smoothing
         shell: bash
         run: |

@@ -1,0 +1,37 @@
+name: Tune Live mobile latency frontier
+on:
+  push:
+    branches: [feature/mobile-oboe-audio-options-20261125]
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_mobile_latency_frontier.cpp'
+      - '.github/workflows/apex-tune-live-latency-frontier.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontier:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Measure lower latency candidates without changing approved Android profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -Werror -isystem "My DAW/DAW_Core/Source/ThirdParty" -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" "My DAW/DAW_Core/Tests/TuneLive/test_mobile_latency_frontier.cpp" -o latency_frontier
+          ./latency_frontier | tee latency-frontier.txt
+      - name: Compare short hop candidates and synchronized multiple inserts
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -Werror -isystem "My DAW/DAW_Core/Source/ThirdParty" -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" "My DAW/DAW_Core/Tests/TuneLive/test_spectral_callback_budget.cpp" -o latency_budget
+          ./latency_budget | tee latency-budget.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-latency-frontier
+          path: |
+            latency-frontier.txt
+            latency-budget.txt

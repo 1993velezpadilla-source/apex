@@ -263,7 +263,10 @@ private:
         repopulateDeviceLists();
         repopulateRateAndBufferLists();
         selectComboText(sampleRateBox_, juce::String(juce::roundToInt(pendingRequest_.sampleRate)), true);
-        selectComboText(bufferBox_, DAW::DevicePanelModelCore::formatBufferSizeLabel(pendingRequest_.bufferSize), true);
+        selectComboText(bufferBox_, DAW::DevicePanelModelCore::usesAndroidOboeCapabilities(pendingRequest_.typeName)
+                                  && pendingRequest_.bufferSize < 192
+            ? juce::String(pendingRequest_.bufferSize) + " (experimental)"
+            : DAW::DevicePanelModelCore::formatBufferSizeLabel(pendingRequest_.bufferSize), true);
 
         updateStatusFromValidation();
     }
@@ -371,10 +374,12 @@ private:
         const auto outputName = outputBox_.getText().isNotEmpty()
             ? outputBox_.getText() : pendingRequest_.outputDeviceName;
 
-        availableRates_   = model_.getAvailableSampleRates (typeName, outputName);
-        availableBuffers_ = model_.getAvailableBufferSizes (typeName, outputName);
+        const auto inputName = inputBox_.getText().isNotEmpty()
+            ? inputBox_.getText() : pendingRequest_.inputDeviceName;
+        availableRates_   = model_.getAvailableSampleRates (typeName, outputName, inputName);
+        availableBuffers_ = model_.getAvailableBufferSizes (typeName, outputName, inputName);
         session_.setSupportedConfig (availableRates_, availableBuffers_);
-        lastEnumeratedCapsKey_ = typeName + "||" + outputName;
+        lastEnumeratedCapsKey_ = DAW::DevicePanelModelCore::rateBufferCapabilityKey(typeName, outputName, inputName);
 
         juce::StringArray rateItems;
         for (const double r : availableRates_)
@@ -385,10 +390,39 @@ private:
 
         juce::StringArray bufferItems;
         for (const int b : availableBuffers_)
-            bufferItems.add (DAW::DevicePanelModelCore::formatBufferSizeLabel (b));
+            bufferItems.add (DAW::DevicePanelModelCore::usesAndroidOboeCapabilities(typeName) && b < 192
+                ? juce::String(b) + " (experimental)"
+                : DAW::DevicePanelModelCore::formatBufferSizeLabel (b));
         if (bufferItems.isEmpty())
             bufferItems.add (juce::String (pendingRequest_.bufferSize));
         setComboItems (bufferBox_, bufferItems);
+
+        // Rebuilding a route's lists must not blank the current selections.
+        // Keep pending values if still valid, otherwise choose the nearest
+        // advertised value. Only Apply commits these choices to the engine.
+        if (DAW::DevicePanelModelCore::usesAndroidOboeCapabilities(typeName))
+        {
+            if (!availableRates_.isEmpty() && !availableRates_.contains(pendingRequest_.sampleRate))
+            {
+                auto nearest = availableRates_.getFirst();
+                for (const auto rate : availableRates_)
+                    if (std::abs(rate - pendingRequest_.sampleRate) < std::abs(nearest - pendingRequest_.sampleRate))
+                        nearest = rate;
+                pendingRequest_.sampleRate = nearest;
+            }
+            if (!availableBuffers_.isEmpty() && !availableBuffers_.contains(pendingRequest_.bufferSize))
+            {
+                auto nearest = availableBuffers_.getFirst();
+                for (const auto size : availableBuffers_)
+                    if (std::abs(double(size) - pendingRequest_.bufferSize) < std::abs(double(nearest) - pendingRequest_.bufferSize))
+                        nearest = size;
+                pendingRequest_.bufferSize = nearest;
+            }
+            selectComboText(sampleRateBox_, juce::String(juce::roundToInt(pendingRequest_.sampleRate)), true);
+            selectComboText(bufferBox_, pendingRequest_.bufferSize < 192
+                ? juce::String(pendingRequest_.bufferSize) + " (experimental)"
+                : DAW::DevicePanelModelCore::formatBufferSizeLabel(pendingRequest_.bufferSize), true);
+        }
     }
 
     juce::String capabilityKey() const
@@ -397,7 +431,9 @@ private:
             ? backendBox_.getText() : pendingRequest_.typeName;
         const auto outputName = outputBox_.getText().isNotEmpty()
             ? outputBox_.getText() : pendingRequest_.outputDeviceName;
-        return typeName + "||" + outputName;
+        const auto inputName = inputBox_.getText().isNotEmpty()
+            ? inputBox_.getText() : pendingRequest_.inputDeviceName;
+        return DAW::DevicePanelModelCore::rateBufferCapabilityKey(typeName, outputName, inputName);
     }
 
     void repopulateOutputChannelChoices()
@@ -767,7 +803,17 @@ private:
             + " buf=" + juce::String(activeBuffer)
             + " elapsedMs=" + juce::String(elapsedMs));
 
+        model_.invalidateDeviceCache();
         refreshFromSnapshot();
+        if (DAW::DevicePanelModelCore::usesAndroidOboeCapabilities(activeType))
+        {
+            const auto requested = juce::String(request.bufferSize);
+            const auto negotiated = juce::String(activeBuffer);
+            statusLabel_.setText("Oboe: " + juce::String(juce::roundToInt(activeRate)) + " Hz / requested "
+                + requested + ", opened " + negotiated + " samples"
+                + (activeBuffer != request.bufferSize ? juce::String(" (safe negotiated size)") : juce::String()),
+                juce::dontSendNotification);
+        }
         applyButton_.setButtonText("Apply");
         setControlsEnabled(true);
 
