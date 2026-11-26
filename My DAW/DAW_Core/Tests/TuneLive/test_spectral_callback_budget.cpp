@@ -8,14 +8,14 @@
 #include <numeric>
 using namespace APEX::TuneLive;
 using Clock=std::chrono::steady_clock;
-static bool probe(int rate,int block,ShifterProfile profile,bool split,int divisor=4,int instances=1,bool stagger=false)
+static bool probe(int rate,int block,ShifterProfile profile,bool split,int divisor=4,int instances=1,bool stagger=false,bool resumeStagger=false)
 {
     std::array<DspCore,8> cores;
     auto& core=cores[0];
     const int hop=std::max(64,int(std::lround(rate*.018/divisor)));
     for(int j=0;j<instances;++j)
         cores[j].prepare(rate,512,2,profile,StudioControlClock::ResearchFixed1ms,split,0.0,divisor,
-                         stagger?j*hop/instances:0);
+                         stagger?j*hop/instances:0,resumeStagger);
     DspSettings cfg;
     cfg.correction=cfg.wet=1;cfg.retune=cfg.humanize=cfg.flexTune=cfg.vibratoPreserve=0;
     cfg.key=1;cfg.scale=1;cfg.preserveFormants=true;
@@ -66,21 +66,30 @@ static bool probe(int rate,int block,ShifterProfile profile,bool split,int divis
     std::sort(times.begin(),times.end());
     const auto p=[&](double q){return times[static_cast<std::size_t>(q*(times.size()-1))];};
     const int latency=core.latencySamples();
-    core.reset();cfg.bypass=true;
+    for(int j=0;j<instances;++j)cores[j].reset();
+    cfg.bypass=true;
     bool aligned=true;
     for(int pos=0;pos+block<=int(source.size());pos+=block){
         std::copy_n(source.data()+pos,block,l.data());
         std::copy_n(source.data()+pos,block,r.data());
         float* ch[]={l.data(),r.data()};
         core.process(ch,2,block,cfg);
+        for(int j=1;j<instances;++j) {
+            std::copy_n(source.data()+pos,block,extraL[j].data());
+            std::copy_n(source.data()+pos,block,extraR[j].data());
+            float* extra[]={extraL[j].data(),extraR[j].data()};
+            cores[j].process(extra,2,block,cfg);
+        }
         for(int i=0;i<block;++i){
             const int at=pos+i-latency;
             const float expected=at>=0?source[at]:0.0f;
             aligned &= l[i]==expected && r[i]==expected;
+            for(int j=1;j<instances;++j)
+                aligned &= extraL[j][i]==expected && extraR[j][i]==expected;
         }
     }
     std::cout<<"SPECTRAL_BUDGET rate="<<rate<<" block="<<block<<" profile="<<int(profile)
-        <<" split="<<split<<" divisor="<<divisor<<" instances="<<instances<<" stagger="<<stagger<<" latency_samples="<<latency<<" deadline_ms="<<deadline
+        <<" split="<<split<<" divisor="<<divisor<<" instances="<<instances<<" stagger="<<stagger<<" resume_stagger="<<resumeStagger<<" latency_samples="<<latency<<" deadline_ms="<<deadline
         <<" p50_ms="<<p(.5)<<" p95_ms="<<p(.95)<<" p99_ms="<<p(.99)
         <<" max_ms="<<times.back()<<" deadline_misses="<<misses<<" misses_after_silence="<<missesAfterSilence<<" count="<<times.size()
         <<" peak="<<peak<<" max_step="<<step<<" rms="<<std::sqrt(energy/source.size())
@@ -111,5 +120,9 @@ int main(){
         for(int block:{32,64,96,128})
             for(int instances:{4,8})
                 ok &= probe(rate,block,ShifterProfile::Experimental18ms,false,4,instances,true);
+    for(int rate:{44100,48000})
+        for(int block:{32,64,96,128})
+            for(int instances:{4,8})
+                ok &= probe(rate,block,ShifterProfile::Experimental18ms,false,4,instances,true,true);
     return ok?0:1;
 }

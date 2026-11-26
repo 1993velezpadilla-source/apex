@@ -31,7 +31,8 @@ public:
                  StudioControlClock clock=StudioControlClock::ApprovedHostChunks,
                  bool splitComputation=false,
                  double researchWindowMs=0.0,int researchHopDivisor=4,
-                 int researchPhaseOffsetSamples=0) {
+                 int researchPhaseOffsetSamples=0,
+                 bool researchResumeStagger=false) {
         profile_=profile;
         fixedClock_=clock==StudioControlClock::ResearchFixed1ms;
         rate_=std::isfinite(sampleRate) && sampleRate>8000.0 ? sampleRate : 48000.0;
@@ -66,6 +67,10 @@ public:
         delay_.assign(static_cast<std::size_t>(channels_)*delayLength_,0.0f);
         delayPosition_=0;
         researchPhaseOffset_=std::clamp(researchPhaseOffsetSamples,0,interval-1);
+        researchResumeStagger_=researchResumeStagger;
+        silentSamples_=0;
+        silenceDrainSamples_=3*window+latency_;
+        spectralDormant_=false;
         primeSpectralPhase();
         // Capture-rate input envelope smoothing coefficient, set off the RT thread.
         envelopeAlpha_=static_cast<float>(1.0/(rate_*0.010+1.0));
@@ -85,6 +90,8 @@ public:
         std::fill(delay_.begin(),delay_.end(),0.0f);
         std::fill(wet_.begin(),wet_.end(),0.0f);
         primeSpectralPhase();
+        silentSamples_=0;
+        spectralDormant_=false;
         delayPosition_=0;
         target_=smooth_=frequency_=wetSlew_=voicedSlew_=voicedTarget_=0.0f;
         pitchActiveSlew_=needsPitchWork_=0.0f;
@@ -180,7 +187,37 @@ public:
             const float* source[2]={channelData[0]+offset,
                 channels==2 ? channelData[1]+offset : nullptr};
             float* processed[2]={wet_.data(),channels==2 ? wet_.data()+block_ : nullptr};
-            stretch_.process(source,count,processed,count);
+            // Experiment: do not disturb the delay line, tracker or wet
+            // envelopes. Only suspend the spectral engine after exact
+            // digital silence has drained its full analysis/output history.
+            // Reset and prime on resume, so upstream's silence shortcut
+            // cannot collapse all instance phases to the same FFT boundary.
+            if(researchResumeStagger_) {
+                bool silent=true;
+                for(int ch=0;ch<channels;++ch)
+                    for(int i=0;i<count;++i) silent &= source[ch][i]==0.0f;
+                if(!silent) {
+                    if(spectralDormant_) {
+                        stretch_.reset();
+                        primeSpectralPhase();
+                        stretch_.setTransposeFactor(std::exp2(smooth_/12.0f));
+                        stretch_.setFormantFactor(1.0f,user.preserveFormants);
+                        stretch_.setFormantBase(frequency_>0 ? frequency_/static_cast<float>(rate_) : 0.0f);
+                    }
+                    spectralDormant_=false;
+                    silentSamples_=0;
+                }
+                if(spectralDormant_) {
+                    for(int ch=0;ch<channels;++ch)
+                        std::fill_n(processed[ch],count,0.0f);
+                } else {
+                    stretch_.process(source,count,processed,count);
+                    if(silent) {
+                        silentSamples_=std::min(silenceDrainSamples_,silentSamples_+count);
+                        if(silentSamples_>=silenceDrainSamples_)spectralDormant_=true;
+                    }
+                }
+            } else stretch_.process(source,count,processed,count);
             for(int i=0;i<count;++i) {
                 // For stereo vocals, track the predominant microphone
                 // channel instead of always assuming a left-side signal.
@@ -242,7 +279,8 @@ private:
             remaining-=n;
         }
     }
-    int researchPhaseOffset_=0;
+    int researchPhaseOffset_=0,silentSamples_=0,silenceDrainSamples_=0;
+    bool researchResumeStagger_=false,spectralDormant_=false;
     PitchTracker tracker_;
     VoiceControl policy_;
     // Stable shifter seed makes repeated APEX offline bounces reproducible.
