@@ -66,6 +66,7 @@ def main() -> int:
             "androidMinimumSDK": "26",
             "microphonePermissionNeeded": "1",
             "androidEnableContentSharing": "1",
+            "externalLibraries": "jnigraphics",
         },
     )
     # Projucer's Android exporter emits headerPath relative to the generated

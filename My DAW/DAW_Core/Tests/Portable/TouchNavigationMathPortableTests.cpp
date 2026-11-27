@@ -147,6 +147,29 @@ int main()
     assert(TouchNavigationMath::zoomPosition(panNan, 40.0, 1.2, 4000, 250) == 250);
     assert(TouchNavigationMath::zoomPosition(320.0, panInf, 1.2, 4000, 250) == 250);
 
+    // A fling travels the same path over elapsed time at different display
+    // rates. A delayed frame is bounded so it cannot teleport the timeline.
+    const auto flingAt = [](int refreshRate)
+    {
+        double velocity = 40.0;
+        double distance = 0.0;
+        double previous = 10.0;
+        for (int i = 1; i <= refreshRate; ++i)
+        {
+            const double now = 10.0 + static_cast<double>(i) / refreshRate;
+            distance += TouchNavigationMath::advanceInertia(
+                velocity, TouchNavigationMath::frameUnits(previous, now));
+            previous = now;
+        }
+        return distance;
+    };
+    assert(std::abs(flingAt(60) - flingAt(90)) < 1e-8);
+    assert(std::abs(flingAt(60) - flingAt(120)) < 1e-8);
+    assert(TouchNavigationMath::frameUnits(0.0, 10.0) == 1.0);
+    assert(TouchNavigationMath::frameUnits(10.0, 10.0) == 1.0);
+    assert(TouchNavigationMath::frameUnits(10.0, 20.0) == 3.0);
+    assert(TouchNavigationMath::frameUnits(10.0, panNan) == 1.0);
+
     // Slow pinch motion accumulates against the last APPLIED distance.
     // A 0.75px/frame motion should eventually trigger, not be discarded.
     const double applied = 100.0;

@@ -57,6 +57,27 @@ namespace ArrangementEditor
             return static_cast<int>(std::lround(targetPx));
         }
 
+        // Motion constants use the original 60 Hz time unit. Derive that unit
+        // from the display clock and cap catch-up after a suspended frame.
+        static double frameUnits(double previousSeconds, double nowSeconds) noexcept
+        {
+            if (!std::isfinite(previousSeconds) || !std::isfinite(nowSeconds)
+                || previousSeconds <= 0.0 || nowSeconds <= previousSeconds)
+                return 1.0;
+            return std::clamp((nowSeconds - previousSeconds) * 60.0, 0.06, 3.0);
+        }
+
+        static double advanceInertia(double& velocity, double frames) noexcept
+        {
+            constexpr double decay = 0.967;
+            const double retention = std::pow(decay, frames);
+            // Integrate the geometric series from the original single-step
+            // glide. Two half-frames travel the same distance as one frame.
+            const double distance = velocity * decay * (1.0 - retention) / (1.0 - decay);
+            velocity *= retention;
+            return distance;
+        }
+
         // A touch sample at a viewport edge (or subpixel jitter) must not
         // schedule an unchanged Viewport position or enter low-detail paint.
         // This applies to two-finger translation independently of zoom.
@@ -125,6 +146,26 @@ namespace ArrangementEditor
                                                       bool isRightButton) noexcept
         {
             return !isFingerInput && !isRightButton;
+        }
+
+        enum class PinchAxis { undecided, horizontal, vertical, both };
+
+        static PinchAxis pinchAxis(double initialX, double initialY,
+                                   double currentX, double currentY) noexcept
+        {
+            // Ignore tiny orthogonal separation: a nearly horizontal pinch
+            // must not resize tracks when the fingers wobble vertically.
+            const double dx = std::max(initialX, currentX) >= 16.0
+                ? std::abs(currentX - initialX) : 0.0;
+            const double dy = std::max(initialY, currentY) >= 16.0
+                ? std::abs(currentY - initialY) : 0.0;
+            if (std::max(dx, dy) < 3.0)
+                return PinchAxis::undecided;
+            if (dx >= 1.5 * dy)
+                return PinchAxis::horizontal;
+            if (dy >= 1.5 * dx)
+                return PinchAxis::vertical;
+            return PinchAxis::both;
         }
 
         // Ignore collapsed/crossed finger-axis separations (<=1 px) so a
